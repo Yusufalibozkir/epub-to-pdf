@@ -1,0 +1,26 @@
+# Reviewed regex extensions for the EPUB cleanup pipeline.
+# These patterns extend the built-in Python regexes. Keep them conservative:
+# broad rules can delete real literature.
+
+promo_patterns:
+  - "\\bfree\\s+sample\\b"
+  - "\\babout\\s+delphi\\s+classics\\b"
+  - "\\bdelphi\\s+poets\\s+series\\b"
+  - "\\bdelphi\\s+complete\\s+works\\b"
+  - "\\bshare\\s+this\\s+book\\b"
+
+plate_caption_patterns:
+  - "\\bcover\\s+image\\b"
+  - "\\btitle\\s+card\\b"
+  - "\\bdecorative\\s+plate\\b"
+  - "\\bphotogravure\\b"
+
+functional_image_clues:
+  - "\\bgenealogical\\s+table\\b"
+  - "\\bfamily\\s+tree\\b"
+  - "\\bground\\s+plan\\b"
+
+publisher_image_src_clues:
+  - "\\bfrontmatter\\b"
+  - "\\btitlepage\\b"
+  - "\\bhalftitle\\b"

@@ -1,0 +1,212 @@
+Deluxe EPUB to PDF - CLI Options Quick Reference
+================================================
+
+Typical sample command
+----------------------
+.\.venv\Scripts\python.exe deluxe_epub_to_pdf.py "book.epub" --config "my_style.yaml" --out "sample.pdf" --sample-pages 50 --debug-html
+
+Typical DeepSeek command
+------------------------
+$env:DEEPSEEK_API_KEY="your-key"
+.\.venv\Scripts\python.exe deluxe_epub_to_pdf.py "book.epub" --config "my_style.yaml" --ai-provider deepseek --out "sample.pdf" --sample-pages 50 --max-auto-fix-passes 2 --debug-html
+
+Typical OpenAI visual QA command
+--------------------------------
+$env:OPENAI_API_KEY="your-key"
+.\.venv\Scripts\python.exe deluxe_epub_to_pdf.py "book.epub" --config "my_style.yaml" --ai-provider openai --openai-qa --out "sample.pdf" --sample-pages 50 --debug-html
+
+
+Input and output
+----------------
+epub
+  Input EPUB path. Required unless using --write-default-config.
+
+--out
+  Output PDF filename/path. Bare filenames go under --output-dir.
+
+--output-dir
+  Folder for PDFs when --out is a bare filename. Default: output.
+
+--artifacts-dir
+  Folder for QA reports, rendered QA pages, and debug builds. Default: artifacts.
+
+--title
+  Optional clean title override. Omit normally; EPUB metadata is used automatically.
+
+--config
+  YAML or JSON config file. Example: --config "my_style.yaml".
+
+--write-default-config
+  Write a complete editable default config and exit.
+
+
+Sampling and build intent
+-------------------------
+--sample-pages
+  Build only the first N PDF pages for review. Recommended before full builds.
+
+--full-without-sample
+  Intentionally build the full book without sample-first warning.
+
+--no-sample-requirement
+  Disable the sample-first warning.
+
+
+Core typography
+---------------
+--body-size
+  Body font size in pt. Config key: body_size_pt.
+
+--line-height
+  Body line-height multiplier. Config key: line_height.
+
+--font-stack / --font-family
+  CSS font-family stack. Config key: font_stack.
+
+--font-dir
+  Folder containing local font files. Config key: font_dir.
+
+--embedded-font-family
+  CSS @font-face family name for local embedded font files.
+
+--embedded-font-regular
+  Regular/upright font filename inside --font-dir.
+
+--embedded-font-italic
+  Italic font filename inside --font-dir.
+
+--embedded-font-weight
+  CSS font-weight or range for embedded font files, e.g. "400" or "400 800".
+
+--no-embed-font-files
+  Disable local @font-face embedding and rely on installed system fonts.
+
+
+Page margins
+------------
+--margin-top
+  Main body page top margin in mm. Config key: margin_top_mm.
+
+--margin-side
+  Equal left/right margin in mm. Config key: margin_side_mm.
+
+--margin-bottom
+  Bottom margin in mm. Config key: margin_bottom_mm.
+
+
+Running heads and folios
+------------------------
+--runner-font
+  Running-head font size in pt. Config key: runner_font_pt.
+
+--folio-font
+  Page-number/folio font size in pt. Config key: folio_font_pt.
+
+--runner-rule-gap
+  Gap between running-head text and CSS rule in mm. Config key: runner_rule_gap_mm.
+
+--runner-body-clearance
+  Extra top body margin after margin_top_mm. Config key: runner_body_clearance_mm.
+
+--runner-rule-y
+  Full-width vector runner rule position from top trim in mm. Config key: runner_rule_y_mm.
+
+--runner-title-top
+  Running-head title offset from top trim in mm. Config key: runner_title_top_mm.
+
+--runner-layout
+  Running-head layout. Choices: right_title_full_rule, centered_single_rule, dual_full_rule, alternating.
+
+--runner-rule-style
+  Runner rule style. Choices: full_width, single, split, none.
+
+--runner-collection-transform
+  CSS text-transform for collection title runner, e.g. none or uppercase.
+
+--runner-work-transform
+  CSS text-transform for current-work runner, e.g. uppercase or none.
+
+
+Paragraphs, headings, verse
+---------------------------
+--paragraph-indent
+  Paragraph first-line indent in em. Config key: paragraph_indent_em.
+
+--subdivision-margin-top
+  Chapter/subdivision heading top margin in mm. Config key: subdivision_margin_top_mm.
+
+--subdivision-margin-bottom
+  Chapter/subdivision heading bottom margin in mm. Config key: subdivision_margin_bottom_mm.
+
+--verse-line-height
+  Verse line-height multiplier. Config key: verse_line_height.
+
+--verse-max-width
+  Verse block max width in mm. Config key: verse_max_width_mm.
+
+
+Images and cleanup
+------------------
+--keep-all-images
+  Keep all EPUB images. Overrides image_policy.
+
+--remove-all-images
+  Remove all EPUB images. Overrides image_policy.
+
+--no-smart-punctuation
+  Disable conservative punctuation cleanup.
+
+
+QA, debug, and optimization
+---------------------------
+--no-optimize
+  Skip pikepdf optimization.
+
+--no-qa-render
+  Do not render PNG QA pages.
+
+--debug-html
+  Keep generated HTML/CSS build folder in artifacts/<run>/build.
+
+--strict
+  Exit non-zero when QA blockers remain.
+
+--max-auto-fix-passes
+  Maximum rerenders after local/AI safe CSS/config fixes. Default: 1.
+
+
+AI providers
+------------
+--ai-provider
+  Provider for text/structure AI tasks. Choices: openai, deepseek, none. Default: openai.
+
+--use-openai
+  Legacy flag name: uses the selected --ai-provider for whole-book structure planning.
+
+--openai-model
+  OpenAI model for structure/image/visual QA.
+
+--deepseek-model
+  DeepSeek model for structure/text QA.
+
+--openai-image-check
+  Uses the selected --ai-provider to classify each image/caption block. Can cost more.
+
+--openai-qa
+  Sends rendered QA page images to OpenAI vision for visual review.
+
+--openai-qa-pages
+  Maximum rendered pages sent to OpenAI visual QA. Default: 10.
+
+--no-text-qa
+  Disable provider text QA, e.g. DeepSeek post-local-QA review.
+
+
+Environment variables
+---------------------
+OPENAI_API_KEY
+  Required for OpenAI structure/image/visual QA.
+
+DEEPSEEK_API_KEY
+  Required for --ai-provider deepseek.
+

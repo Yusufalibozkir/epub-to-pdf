@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+
+output/
+artifacts/
+
+book.epub
+*.epub
+
+run.log
+*.tmp

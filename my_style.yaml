@@ -1,0 +1,74 @@
+# Deluxe EPUB-to-print-PDF pipeline config
+# Missing keys keep the built-in defaults. You can delete anything you do not want to override.
+# Override order: built-in defaults -> this config file -> explicit CLI flags.
+
+title: ""
+trim_size: "A4"
+body_size_pt: 11.6
+line_height: 1.23
+font_stack: "\"EB Garamond\", \"Cormorant Garamond\", Garamond, Georgia, serif"
+embed_font_files: true
+font_dir: "fonts"
+embedded_font_family: "EB Garamond"
+embedded_font_regular: "EBGaramond-wght.ttf"
+embedded_font_italic: "EBGaramond-Italic-wght.ttf"
+embedded_font_weight: "400 800"
+text_color: "#111"
+body_font_weight: "400"
+hyphenate: true
+justify_prose: true
+margin_top_mm: 15.0
+margin_side_mm: 22.0
+margin_bottom_mm: 25.0
+front_margin_top_mm: 25.0
+front_margin_bottom_mm: 24.0
+runner_font_pt: 9.4
+runner_letter_spacing_em: 0.04
+runner_rule_gap_mm: 3.2
+runner_body_clearance_mm: 2.0
+runner_rule_y_mm: 17.0
+runner_title_top_mm: 8.5
+runner_rule_weight_pt: 0.45
+runner_rule_color: "#222"
+runner_layout: "right_title_full_rule"
+runner_rule_style: "full_width"
+runner_collection_transform: "none"
+runner_work_transform: "uppercase"
+folio_font_pt: 10.0
+front_folio_font_pt: 9.3
+paragraph_indent_em: 1.25
+blockquote_side_margin_mm: 10.0
+blockquote_font_percent: 96.0
+major_opener_top_margin_mm: 55.0
+major_opener_bottom_margin_mm: 15.0
+major_work_font_pt: 23.5
+collection_division_font_pt: 25.0
+subdivision_font_pt: 14.8
+subdivision_margin_top_mm: 10.0
+subdivision_margin_bottom_mm: 5.0
+h3_font_pt: 13.0
+minor_heading_font_pt: 11.4
+toc_title_font_pt: 19.0
+toc_level_1_font_pt: 11.4
+toc_level_2_font_pt: 10.5
+toc_level_3_font_pt: 10.0
+toc_level_4_font_pt: 9.7
+toc_line_height: 1.11
+toc_entry_gap_mm: 2.9
+verse_max_width_mm: 128.0
+verse_line_height: 1.15
+verse_hanging_indent_em: 1.4
+verse_block_margin_top_mm: 4.0
+verse_block_margin_bottom_mm: 5.0
+cast_max_width_mm: 132.0
+cast_line_height: 1.16
+image_policy: "functional"
+smart_punctuation: true
+rule_pack_dir: "rules"
+rule_packs: "generic_epub.yaml"
+write_ai_rule_suggestions: true
+title_page_subtitle: ""
+include_source_note: false
+source_note_text: "Prepared as a single-page A4 print interior from the supplied EPUB source."
+strict: false
+no_sample_requirement: false

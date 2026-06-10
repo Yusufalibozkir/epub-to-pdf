@@ -1,0 +1,102 @@
+# Deluxe EPUB-to-print-PDF pipeline config
+#
+# Missing keys keep the built-in defaults. Delete or comment out anything you do not want to control.
+# Override order is:
+#   1. built-in defaults
+#   2. this config file
+#   3. explicit command-line flags such as --body-size or --line-height
+#
+# Usage:
+#   python deluxe_epub_to_pdf.py book.epub --config deluxe_config.example.yaml --out sample.pdf --sample-pages 50
+
+# Book identity
+title: ""                  # Leave empty to infer from EPUB metadata, or set a clean title.
+trim_size: "A4"             # Baseline is A4. Other trim sizes need extra manual QA.
+
+# Core typography
+body_size_pt: 11.6
+line_height: 1.23
+font_stack: '"EB Garamond", "Cormorant Garamond", Garamond, Georgia, serif'
+embed_font_files: true          # Embed local TTF files so PDFs do not fall back to Times/Garamond.
+font_dir: "fonts"               # Relative paths resolve from the run folder, then the script folder.
+embedded_font_family: "EB Garamond"
+embedded_font_regular: "EBGaramond-wght.ttf"
+embedded_font_italic: "EBGaramond-Italic-wght.ttf"
+embedded_font_weight: "400 800" # EB Garamond variable font range.
+text_color: "#111"
+body_font_weight: "400"     # Keep 400 for normal Garamond; increase only carefully.
+hyphenate: true
+justify_prose: true
+
+# Margins / live area
+margin_top_mm: 24.0
+margin_side_mm: 22.0        # Equal left/right margins by default.
+margin_bottom_mm: 25.0
+front_margin_top_mm: 25.0
+front_margin_bottom_mm: 24.0
+
+# Running heads and folios
+runner_font_pt: 9.4
+runner_letter_spacing_em: 0.04
+runner_rule_gap_mm: 3.2          # Gap between runner text and the horizontal rule.
+runner_body_clearance_mm: 6.0    # Extra normal-page air between runner rule area and body text.
+runner_rule_y_mm: 17.0           # Full-width vector runner rule position from top trim.
+runner_title_top_mm: 8.5         # Running-head title offset from top trim.
+runner_rule_weight_pt: 0.45
+runner_rule_color: "#222"
+runner_layout: "right_title_full_rule" # default: collection title on verso, current work on recto, plus one full-width vector rule.
+runner_rule_style: "full_width"  # full_width, single, split, or none.
+runner_collection_transform: "none"
+runner_work_transform: "uppercase"
+folio_font_pt: 10.0
+front_folio_font_pt: 9.3
+
+# Paragraphs / block text
+paragraph_indent_em: 1.25
+blockquote_side_margin_mm: 10.0
+blockquote_font_percent: 96.0
+
+# Major openings / headings
+major_opener_top_margin_mm: 55.0
+major_opener_bottom_margin_mm: 15.0
+major_work_font_pt: 23.5
+collection_division_font_pt: 25.0
+subdivision_font_pt: 14.8
+subdivision_margin_top_mm: 10.0
+subdivision_margin_bottom_mm: 5.0
+h3_font_pt: 13.0
+minor_heading_font_pt: 11.4
+
+# Table of contents
+toc_title_font_pt: 19.0
+toc_level_1_font_pt: 11.4
+toc_level_2_font_pt: 10.5
+toc_level_3_font_pt: 10.0
+toc_level_4_font_pt: 9.7
+toc_line_height: 1.11
+toc_entry_gap_mm: 2.9
+
+# Poetry / verse
+verse_max_width_mm: 128.0
+verse_line_height: 1.15
+verse_hanging_indent_em: 1.4
+verse_block_margin_top_mm: 4.0
+verse_block_margin_bottom_mm: 5.0
+
+# Drama / cast lists
+cast_max_width_mm: 132.0
+cast_line_height: 1.16
+
+# Image behavior
+# functional = keep authorial/functional images and remove obvious publisher plates/promotional images.
+# keep-all = keep all EPUB images.
+# remove-all = remove all images.
+image_policy: "functional"
+
+# Cleanup behavior
+smart_punctuation: true
+rule_pack_dir: "rules"
+rule_packs: "generic_epub.yaml" # Comma-separated reviewed YAML rule packs loaded after built-in regexes.
+write_ai_rule_suggestions: true # AI suggestions are written to *.review.yaml, not loaded automatically.
+strict: false
+no_sample_requirement: false
