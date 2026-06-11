@@ -1,6 +1,12 @@
 # Reviewed regex extensions for the EPUB cleanup pipeline.
-# These patterns extend the built-in Python regexes. Keep them conservative:
-# broad rules can delete real literature.
+# These patterns extend the built-in Python regexes defined in pipeline/_constants.py.
+# Keep them conservative — broad rules can delete real literature.
+#
+# Supported keys (all 13 rule-pack keys from RULE_PACK_KEYS):
+#   promo_patterns, backmatter_patterns, local_toc_headings, collection_divisions,
+#   major_work_hints, chapter_headings, cast_headings, plate_caption_patterns,
+#   functional_image_clues, functional_image_src_clues, publisher_image_src_clues,
+#   local_contents_line, poetry_class
 
 promo_patterns:
   - "\\bfree\\s+sample\\b"
@@ -24,3 +30,11 @@ publisher_image_src_clues:
   - "\\bfrontmatter\\b"
   - "\\btitlepage\\b"
   - "\\bhalftitle\\b"
+
+# Additional conservative patterns — reviewed and safe for broad use
+backmatter_patterns:
+  - "\\btranslator'?s\\s+(preface|introduction|note)\\b"
+  - "\\beditor'?s\\s+(preface|introduction|note)\\b"
+
+local_contents_line:
+  - "\\b(page|line)\\s+\\d+\\b"

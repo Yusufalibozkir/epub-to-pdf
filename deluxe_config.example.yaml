@@ -8,12 +8,17 @@
 #
 # Usage:
 #   python deluxe_epub_to_pdf.py book.epub --config deluxe_config.example.yaml --out sample.pdf --sample-pages 50
+#   python -m pipeline book.epub --config deluxe_config.example.yaml --out sample.pdf --sample-pages 50
 
+# =============================================================================
 # Book identity
+# =============================================================================
 title: ""                  # Leave empty to infer from EPUB metadata, or set a clean title.
 trim_size: "A4"             # Baseline is A4. Other trim sizes need extra manual QA.
 
+# =============================================================================
 # Core typography
+# =============================================================================
 body_size_pt: 11.6
 line_height: 1.23
 font_stack: '"EB Garamond", "Cormorant Garamond", Garamond, Georgia, serif'
@@ -28,46 +33,71 @@ body_font_weight: "400"     # Keep 400 for normal Garamond; increase only carefu
 hyphenate: true
 justify_prose: true
 
-# Margins / live area
-margin_top_mm: 24.0
-margin_side_mm: 22.0        # Equal left/right margins by default.
-margin_bottom_mm: 25.0
-front_margin_top_mm: 25.0
-front_margin_bottom_mm: 24.0
+# =============================================================================
+# Typographic refinements
+# =============================================================================
+drop_caps: true               # Decorative drop caps at chapter starts.
+small_caps: true              # Automatic small-caps normalization for abbreviations.
+ligature_setting: "common"    # CSS font-variant-ligatures: common, none, all, discretionary.
+footnote_handling: "auto"     # How to handle inline footnote bodies: auto, endnotes-only, disabled.
 
+# =============================================================================
+# Margins / live area
+# =============================================================================
+margin_top_mm: 24.0
+margin_side_mm: 22.0          # Equal left/right margins by default.
+margin_bottom_mm: 25.0
+front_margin_top_mm: 25.0     # Front-matter top margin override.
+front_margin_bottom_mm: 24.0  # Front-matter bottom margin override.
+
+# =============================================================================
 # Running heads and folios
+# =============================================================================
 runner_font_pt: 9.4
 runner_letter_spacing_em: 0.04
-runner_rule_gap_mm: 3.2          # Gap between runner text and the horizontal rule.
-runner_body_clearance_mm: 6.0    # Extra normal-page air between runner rule area and body text.
-runner_rule_y_mm: 17.0           # Full-width vector runner rule position from top trim.
-runner_title_top_mm: 8.5         # Running-head title offset from top trim.
-runner_rule_weight_pt: 0.45
-runner_rule_color: "#222"
-runner_layout: "right_title_full_rule" # default: collection title on verso, current work on recto, plus one full-width vector rule.
-runner_rule_style: "full_width"  # full_width, single, split, or none.
-runner_collection_transform: "none"
-runner_work_transform: "uppercase"
+runner_rule_gap_mm: 3.2           # Gap between runner text and the horizontal rule.
+runner_body_clearance_mm: 6.0     # Extra normal-page air between runner rule area and body text.
+runner_rule_y_mm: 17.0            # Full-width vector runner rule Y-position from top trim.
+runner_title_top_mm: 8.5          # Running-head title offset from top trim.
+runner_rule_weight_pt: 0.45       # Thickness of the vector runner rule.
+runner_rule_color: "#222"         # Runner rule stroke colour.
+runner_layout: "right_title_full_rule"  # Layout: right_title_full_rule, centered_single_rule, dual_full_rule, alternating.
+runner_rule_style: "full_width"   # Rule rendering: full_width, single, split, none.
+runner_collection_transform: "none"      # CSS text-transform for collection title runner.
+runner_work_transform: "uppercase"       # CSS text-transform for current-work runner.
 folio_font_pt: 10.0
 front_folio_font_pt: 9.3
 
+# =============================================================================
 # Paragraphs / block text
+# =============================================================================
 paragraph_indent_em: 1.25
 blockquote_side_margin_mm: 10.0
 blockquote_font_percent: 96.0
 
+# =============================================================================
 # Major openings / headings
-major_opener_top_margin_mm: 55.0
-major_opener_bottom_margin_mm: 15.0
-major_work_font_pt: 23.5
-collection_division_font_pt: 25.0
-subdivision_font_pt: 14.8
+# =============================================================================
+major_opener_top_margin_mm: 55.0      # Top whitespace before major work titles.
+major_opener_bottom_margin_mm: 15.0   # Space after major work titles.
+major_work_font_pt: 23.5              # Font size for major work openers.
+collection_division_font_pt: 25.0     # Font size for parent divisions ("The Novels", etc.).
+work_description_font_delta_pt: -1.0  # Editorial blurbs render body_size_pt minus this value.
+work_description_bottom_margin_mm: 7.0  # Gap after editorial description before author's text.
+part_heading_font_pt: 11.6            # Compact "PART I" labels inside a work.
+part_heading_margin_bottom_mm: 6.0
+chapter_section_font_pt: 11.6         # Compact labels ("INTRODUCTION") below "CHAPTER I".
+chapter_section_margin_top_mm: 5.0
+chapter_section_margin_bottom_mm: 3.0
+subdivision_font_pt: 14.8             # Ordinary "CHAPTER I" heading size.
 subdivision_margin_top_mm: 10.0
 subdivision_margin_bottom_mm: 5.0
 h3_font_pt: 13.0
 minor_heading_font_pt: 11.4
 
+# =============================================================================
 # Table of contents
+# =============================================================================
 toc_title_font_pt: 19.0
 toc_level_1_font_pt: 11.4
 toc_level_2_font_pt: 10.5
@@ -76,27 +106,54 @@ toc_level_4_font_pt: 9.7
 toc_line_height: 1.11
 toc_entry_gap_mm: 2.9
 
+# =============================================================================
 # Poetry / verse
+# =============================================================================
 verse_max_width_mm: 128.0
 verse_line_height: 1.15
 verse_hanging_indent_em: 1.4
 verse_block_margin_top_mm: 4.0
 verse_block_margin_bottom_mm: 5.0
 
+# =============================================================================
 # Drama / cast lists
+# =============================================================================
 cast_max_width_mm: 132.0
 cast_line_height: 1.16
 
+# =============================================================================
 # Image behavior
-# functional = keep authorial/functional images and remove obvious publisher plates/promotional images.
-# keep-all = keep all EPUB images.
+# =============================================================================
+# functional = keep authorial/functional images, remove publisher plates/promotional images.
+# keep-all   = keep all EPUB images.
 # remove-all = remove all images.
 image_policy: "functional"
 
+# =============================================================================
 # Cleanup behavior
+# =============================================================================
 smart_punctuation: true
-rule_pack_dir: "rules"
-rule_packs: "generic_epub.yaml" # Comma-separated reviewed YAML rule packs loaded after built-in regexes.
-write_ai_rule_suggestions: true # AI suggestions are written to *.review.yaml, not loaded automatically.
+rule_pack_dir: "rules"                      # Directory for YAML rule-pack files.
+rule_packs: "generic_epub.yaml"             # Comma-separated reviewed YAML rule packs.
+write_ai_rule_suggestions: true             # Write AI-generated rule suggestions to *.review.yaml (not auto-loaded).
+
+# =============================================================================
+# Front matter / work divider pages
+# =============================================================================
+include_half_title_page: false    # Set true to insert a half-title page before the title page.
+include_title_page: true
+half_title_page_font_pt: 22.0
+title_page_font_pt: 30.0
+title_page_collection_font_pt: 21.0   # "Complete Works" / "Collected Works" line size.
+title_page_of_font_pt: 14.0           # "of" line size on collected-works covers.
+title_page_subtitle: ""
+include_source_note: false
+source_note_text: "Prepared as a single-page A4 print interior from the supplied EPUB source."
+major_opener_blank_before: true  # Insert blank page before major work/division openers.
+major_opener_blank_after: true   # Insert blank page after major work/division openers.
+
+# =============================================================================
+# Pipeline behavior
+# =============================================================================
 strict: false
 no_sample_requirement: false

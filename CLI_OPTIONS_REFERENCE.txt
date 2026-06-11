@@ -5,15 +5,19 @@ Typical sample command
 ----------------------
 .\.venv\Scripts\python.exe deluxe_epub_to_pdf.py "book.epub" --config "my_style.yaml" --out "sample.pdf" --sample-pages 50 --debug-html
 
-Typical DeepSeek command
-------------------------
+Typical DeepSeek command (text QA + rule suggestions)
+-----------------------------------------------------
 $env:DEEPSEEK_API_KEY="your-key"
-.\.venv\Scripts\python.exe deluxe_epub_to_pdf.py "book.epub" --config "my_style.yaml" --ai-provider deepseek --out "sample.pdf" --sample-pages 50 --max-auto-fix-passes 2 --debug-html
+.\.venv\Scripts\python.exe deluxe_epub_to_pdf.py "book.epub" --config "my_style.yaml" --ai-provider deepseek --use-openai --out "sample.pdf" --sample-pages 50 --max-auto-fix-passes 2 --debug-html
 
 Typical OpenAI visual QA command
 --------------------------------
 $env:OPENAI_API_KEY="your-key"
 .\.venv\Scripts\python.exe deluxe_epub_to_pdf.py "book.epub" --config "my_style.yaml" --ai-provider openai --openai-qa --out "sample.pdf" --sample-pages 50 --debug-html
+
+Package entry point (same as wrapper)
+--------------------------------------
+.\.venv\Scripts\python.exe -m pipeline "book.epub" --config "my_style.yaml" --out "sample.pdf" --sample-pages 50
 
 
 Input and output
@@ -22,13 +26,13 @@ epub
   Input EPUB path. Required unless using --write-default-config.
 
 --out
-  Output PDF filename/path. Bare filenames go under --output-dir.
+  Output PDF filename/path. Bare filenames go under --output-dir. Default: print_ready.pdf.
 
 --output-dir
   Folder for PDFs when --out is a bare filename. Default: output.
 
 --artifacts-dir
-  Folder for QA reports, rendered QA pages, and debug builds. Default: artifacts.
+  Folder for QA reports, rendered QA pages, debug builds, and cache. Default: artifacts.
 
 --title
   Optional clean title override. Omit normally; EPUB metadata is used automatically.
@@ -49,7 +53,7 @@ Sampling and build intent
   Intentionally build the full book without sample-first warning.
 
 --no-sample-requirement
-  Disable the sample-first warning.
+  Disable the sample-first warning (config key: no_sample_requirement).
 
 
 Core typography
@@ -118,7 +122,8 @@ Running heads and folios
   Running-head layout. Choices: right_title_full_rule, centered_single_rule, dual_full_rule, alternating.
 
 --runner-rule-style
-  Runner rule style. Choices: full_width, single, split, none.
+  Runner rule rendering style. Choices: full_width, single, split, none.
+  Config key: runner_rule_style.
 
 --runner-collection-transform
   CSS text-transform for collection title runner, e.g. none or uppercase.
@@ -145,34 +150,78 @@ Paragraphs, headings, verse
   Verse block max width in mm. Config key: verse_max_width_mm.
 
 
+Typography refinements (CLI)
+----------------------------
+--no-drop-caps
+  Disable decorative drop caps at chapter starts (config key: drop_caps).
+
+--no-small-caps
+  Disable automatic small-caps normalization for abbreviations (config key: small_caps).
+
+--ligature-setting
+  CSS font-variant-ligatures setting. Choices: common, none, all, discretionary.
+
+--footnote-handling
+  How to handle inline footnote bodies. Choices: auto, endnotes-only, disabled.
+
+
+Config-only collected-works apparatus keys
+------------------------------------------
+work_description_font_delta_pt
+  Size adjustment for editorial descriptions after major work titles. Default: -1.0.
+
+work_description_bottom_margin_mm
+  Bottom margin after editorial descriptions before the author's text. Default: 7.0.
+
+Notes
+  Subtitles (e.g. "A PETERSBURG POEM") stay roman.
+  Editorial descriptions (e.g. "The novella...") are styled smaller italic.
+  Local QA inspects rendered PDF fonts/sizes for detected work descriptions.
+
+part_heading_font_pt / part_heading_margin_bottom_mm
+  Compact in-work part labels such as "PART I".
+
+chapter_section_font_pt / chapter_section_margin_top_mm / chapter_section_margin_bottom_mm
+  Compact section labels such as "INTRODUCTION" below "CHAPTER I".
+
+
 Images and cleanup
 ------------------
 --keep-all-images
-  Keep all EPUB images. Overrides image_policy.
+  Keep all EPUB images. Overrides image_policy setting.
 
 --remove-all-images
-  Remove all EPUB images. Overrides image_policy.
+  Remove all EPUB images. Overrides image_policy setting.
 
 --no-smart-punctuation
-  Disable conservative punctuation cleanup.
+  Disable conservative punctuation cleanup (config key: smart_punctuation).
+
+
+Caching
+-------
+--no-cache
+  Disable content-addressed caching of intermediate pipeline results.
+  Use when iterating on rule packs or plugin changes.
 
 
 QA, debug, and optimization
 ---------------------------
 --no-optimize
-  Skip pikepdf optimization.
+  Skip pikepdf PDF optimization.
 
 --no-qa-render
-  Do not render PNG QA pages.
+  Do not render PNG QA page images.
 
 --debug-html
-  Keep generated HTML/CSS build folder in artifacts/<run>/build.
+  Keep generated HTML/CSS build folder in artifacts/<run>/build/.
 
 --strict
-  Exit non-zero when QA blockers remain.
+  Exit non-zero when delivery-blocking QA warnings remain.
 
 --max-auto-fix-passes
-  Maximum rerenders after local/AI safe CSS/config fixes. Default: 1.
+  Maximum re-renders after local/AI safe CSS/config fixes. Default: 1.
+  Each pass re-runs QA; fixable issues (header clearance, TOC spacing, etc.)
+  are adjusted automatically.
 
 
 AI providers
@@ -181,25 +230,29 @@ AI providers
   Provider for text/structure AI tasks. Choices: openai, deepseek, none. Default: openai.
 
 --use-openai
-  Legacy flag name: uses the selected --ai-provider for whole-book structure planning.
+  Use the selected --ai-provider for whole-book structure planning.
 
 --openai-model
-  OpenAI model for structure/image/visual QA.
+  OpenAI model for structure/image/visual QA. Default: gpt-5.4-mini.
 
 --deepseek-model
-  DeepSeek model for structure/text QA.
+  DeepSeek model for structure/text QA. Default: deepseek-chat.
 
 --openai-image-check
-  Uses the selected --ai-provider to classify each image/caption block. Can cost more.
+  Use the selected --ai-provider to classify each image/caption block.
+  Can increase API cost on image-heavy EPUBs.
 
 --openai-qa
-  Sends rendered QA page images to OpenAI vision for visual review.
+  Send rendered QA page images to OpenAI vision for visual review.
 
 --openai-qa-pages
   Maximum rendered pages sent to OpenAI visual QA. Default: 10.
 
+--ai-qa-pages
+  Maximum sequential PDF pages scanned for AI text QA (plus work-opening pages). Default: 50.
+
 --no-text-qa
-  Disable provider text QA, e.g. DeepSeek post-local-QA review.
+  Disable provider text QA (e.g. DeepSeek post-local-QA review).
 
 
 Environment variables
@@ -209,4 +262,3 @@ OPENAI_API_KEY
 
 DEEPSEEK_API_KEY
   Required for --ai-provider deepseek.
-

@@ -1,0 +1,343 @@
+================================================================================
+ARCHITECTURE SUMMARY: pipeline/ package + deluxe_epub_to_pdf.py wrapper
+================================================================================
+Dependencies: BeautifulSoup4, ebooklib, WeasyPrint, lxml, PyYAML, pikepdf,
+              PyMuPDF (fitz), Pillow, openai
+================================================================================
+
+1. HIGH-LEVEL PURPOSE
+---------------------
+A modular Python package that converts an EPUB file into a print-oriented A4 PDF
+interior suitable for deluxe physical book editions. Targets large public-domain
+collected works (Delphi Classics, Project Gutenberg) and automates strict book-
+production rules: professional structure, recto/verso starts, roman/Arabic
+pagination, running heads, poetry/drama handling, image/plate cleanup, TOC page
+numbers, PDF preflight QA, AI-assisted planning, and auto-fix.
+
+2. ENTRY POINTS
+---------------
+Two equivalent entry points:
+
+  python deluxe_epub_to_pdf.py "book.epub"   # thin wrapper script
+  python -m pipeline "book.epub"             # package entry (pipeline/__main__.py)
+
+Both call pipeline._cli.parse_args() then pipeline._pipeline.build_pipeline().
+
+3. ARCHITECTURE OVERVIEW
+-------------------------
+
+   ┌──────────┐    ┌──────────────┐    ┌────────────┐    ┌──────────┐
+   │ EPUB     │───▶│ SCAN &       │───▶│ CLEAN &    │───▶│ COMPOSE  │
+   │ (ebooklib)│   │ CLASSIFY     │    │ NORMALIZE  │    │ HTML+CSS │
+   └──────────┘    └──────────────┘    └────────────┘    └──────────┘
+                         │                    │                │
+                    [Optional AI]       [Rule Packs]      [WeasyPrint]
+                         │                    │                │
+                         ▼                    ▼                ▼
+                   ┌──────────────────────────────────────────────┐
+                   │         PDF RENDER + QA + AUTO-FIX            │
+                   │  (PyMuPDF preflight, vector runner rules,     │
+                   │   PNG renders, dark-page check, TOC sanity,   │
+                   │   work description style checks, auto-fix)    │
+                   └──────────────────────────────────────────────┘
+                                      │
+                                      ▼
+                              ┌──────────────┐
+                              │ QA REPORT    │
+                              │ + VERDICT    │
+                              │ + RENDERS    │
+                              └──────────────┘
+                                      │
+                         [Optional AI Visual/Text QA]
+                                      │
+                               [Auto-fix loop]
+                           (up to --max-auto-fix-passes)
+
+4. PACKAGE MODULES
+------------------
+
+pipeline/_constants.py      -- 15 compiled regex patterns (13 rule-pack extensible)
+                               + dimensional constants + SMART_QUOTES_MAP
+pipeline/_models.py         -- Settings, SpineDoc, TocEntry, BuildLog, QAVerdict
+                               dataclasses + SECTION_SCHEMA / IMAGE_SCHEMA
+pipeline/_cli.py            -- argparse definitions (~90 flags)
+pipeline/_config.py         -- YAML/JSON config loading, CLI override application,
+                               write_default_config(), resolve_output_pdf()
+pipeline/_utils.py          -- Text/path utilities (clean_text, slugify, unique_id,
+                               normalized_title_key, parse_html, copy_assets, etc.)
+pipeline/_classify.py       -- EPUB scanner: read_epub(), infer_title_with_source(),
+                               scan_spine_items(), heuristic_classify_doc()
+pipeline/_cleaners.py       -- ~20 HTML transformation functions:
+                               strip_bad_attributes, remove_promotional_blocks,
+                               remove_local_mini_tocs, rewrite_images,
+                               split_br_verse_block, normalize_poetry,
+                               normalize_cast_and_drama, normalize_notes_refs,
+                               normalize_headings, mark_major_work_descriptions,
+                               add_synthetic_opener_if_needed, etc.
+pipeline/_css.py            -- CSS generation (css_text(), build_toc()) driven by
+                               Settings dataclass. Generates ~400 lines of print CSS
+                               with @page rules, runner layouts, TOC styles, etc.
+pipeline/_render.py         -- PDF rendering (WeasyPrint), optimization (pikepdf),
+                               preflight QA (PyMuPDF), vector runner-rule drawing,
+                               TOC page-number resolution, subset/sample PDF creation
+pipeline/_fonts.py          -- Font/image asset copying and @font-face CSS generation
+pipeline/_ai.py             -- AI integration: OpenAI + DeepSeek providers.
+                               Book structure planning, image classification,
+                               visual QA (vision model), text QA (with regex
+                               rule-suggestion generation)
+pipeline/_rule_packs.py     -- YAML rule-pack loader: extends built-in regex patterns
+                               at runtime with externally reviewed patterns
+pipeline/_plugins.py        -- Plugin system: auto-discovers Python modules in
+                               plugins/ directory, registers custom cleaners,
+                               classifiers, regex patterns, QA checks, post-processors
+pipeline/_cache.py          -- Content-addressed caching (SHA-256). Stores/loads
+                               intermediate results per namespace/key with pickle
+                               and text/JSON support
+pipeline/_dag.py            -- DAG pipeline executor: PipelineDAG, Stage,
+                               PipelineContext, topological sort (Kahn's algorithm),
+                               per-stage cache keys
+pipeline/_pipeline.py       -- Build orchestrator: build_once() executes a single DAG
+                               pass; build_pipeline() manages config, rule packs,
+                               auto-fix iterations; _create_pipeline_dag() wires
+                               12 stages with cache keys
+
+5. DETAILED COMPONENT BREAKDOWN
+--------------------------------
+
+5.1. Constants and Regex Patterns (pipeline/_constants.py)
+    Fifteen compiled regex patterns form the deterministic classification
+    engine. 13 are rule-pack extensible via RULE_PACK_KEYS:
+      - PROMO_PATTERNS: catches Delphi/Gutenberg promotional boilerplate,
+        catalogue pages, newsletter signups, ISBN lines, app store links.
+      - BACKMATTER_PATTERNS: identifies notes, endnotes, appendices,
+        bibliography, glossary, index, chronology, translator notes.
+      - LOCAL_TOC_HEADINGS: "Contents", "Table of Contents", "Chapter List".
+      - COLLECTION_DIVISIONS: "The Novels", "Short Stories", "Plays", "Poetry",
+        "Poems", "Memoirs", "Letters", "Essays", etc.
+      - MAJOR_WORK_HINTS: "Book I", "Part II", "Novel", "Play", "Poem".
+      - CHAPTER_HEADINGS: "CHAPTER", "PART", "SCENE", "ACT", "SECTION",
+        Roman numerals, bare digits.
+      - CAST_HEADINGS: "Dramatis Personae", "Characters", "Persons of the Play".
+      - ACT_SCENE_HEADINGS: "ACT I", "SCENE II".
+      - PLATE_CAPTION_PATTERNS: Delphi decorative plates, author portraits,
+        birthplace photos, monument/tomb images, edition engravings.
+      - FUNCTIONAL_IMAGE_CLUES: maps, diagrams, charts, runes, inscriptions,
+        facsimiles, manuscripts, ground plans, musical scores.
+      - FUNCTIONAL_IMAGE_SRC_CLUES: same as above but for image src attributes.
+      - PUBLISHER_IMAGE_SRC_CLUES: cover, frontispiece, portrait, photo,
+        author, birthplace, house, grave, museum, catalogue, promo.
+      - LOCAL_CONTENTS_LINE_RE: chapter/act/scene/date patterns in TOC lines.
+      - POETRY_CLASS_RE: poem, poetry, stanza, verse, canto, song, epigram, ode.
+      - ROMAN_RE: pure Roman numeral matcher.
+      - Pattern registry: _PATTERN_DICT, update_pattern(), get_pattern() for
+        runtime rule-pack extension.
+
+5.2. Data Models (pipeline/_models.py)
+    - Settings dataclass (~100 fields): the entire typographic configuration —
+      trim size, body font size/line-height/stack, margin geometry, running head
+      layout (4 layout variants, 4 rule styles), folio sizing, paragraph indent,
+      blockquote margins, heading hierarchy (8 levels with independent sizes and
+      margins), TOC styling (4 levels), poetry verse block sizing, cast list
+      layout, image policy, front matter generation flags, typographic refinements
+      (drop_caps, small_caps, ligature_setting, footnote_handling), rule pack
+      paths, pipeline behavior flags.
+
+    - SpineDoc dataclass: one EPUB spine item with index, item_id, name, href,
+      raw bytes, extracted headings, text sample, classification kind, remove
+      flag, major_title, current_division, poetry/drama/image booleans.
+
+    - TocEntry dataclass: level, title, target_id, kind (division/work/backmatter).
+
+    - BuildLog dataclass: tracks removed blocks/documents, kept/removed images,
+      warnings, hard failures, AI decisions, typographic fix counts, CSS auto-fixes.
+
+    - QAVerdict dataclass: comprehensive QA state — page count, non-A4 pages,
+      line spills, dark pages, blank page artifacts, header collisions, narrow
+      columns, TOC warnings, work description warnings, first body folio warnings,
+      orphan/widow warnings, OpenAI visual flags, text QA flags, rule suggestions.
+
+    - SECTION_SCHEMA / IMAGE_SCHEMA: JSON schemas for AI response validation.
+
+5.3. EPUB Scanner and Classifiers (pipeline/_classify.py)
+    - read_epub(): uses ebooklib to open EPUB, extracts spine document items.
+    - infer_title_with_source(): reads DC:title metadata from EPUB, falls back
+      to filename stem.
+    - scan_spine_items(): iterates spine items, extracts probe data (headings,
+      text sample, poetry/drama/image flags), runs heuristic_classify_doc().
+    - heuristic_classify_doc(): deterministic classification using regex patterns.
+    - Plugin hook: plugin classifiers run after heuristic classification.
+
+5.4. HTML Cleanup and Normalization (pipeline/_cleaners.py)
+    ~20 transformation functions applied per document, with plugin cleaner hooks:
+
+    a) strip_bad_attributes()
+    b) unwrap_useless_inline_tags()
+    c) remove_promotional_blocks()
+    d) remove_local_mini_tocs()
+    e) remove_compact_local_contents_blocks()
+    f) rewrite_images() — with should_keep_image() multi-tier decision
+    g) remove_orphan_image_captions()
+    h) remove_empty_layout_shells()
+    i) remove_duplicate_current_work_title_line()
+    j) split_br_verse_block()
+    k) normalize_poetry() — short-line sequence grouping
+    l) normalize_cast_and_drama()
+    m) normalize_cast_entries()
+    n) normalize_notes_refs()
+    o) promote_paragraph_headings()
+    p) normalize_headings() — core heading classifier
+    q) add_synthetic_opener_if_needed()
+    r) mark_major_work_descriptions()
+    s) mark_standalone_work_description_fragment()
+    t) insert_major_opener_separators()
+
+5.5. CSS Generation (pipeline/_css.py)
+    css_text() generates the complete print stylesheet driven by Settings values:
+      - @page rules for title, front, body, opener, nofolio, :blank.
+      - Running head layouts: right_title_full_rule, centered_single_rule,
+        dual_full_rule, alternating.
+      - Runner rule variants: full_width, single, split, none.
+      - Dual TOC rendering with CSS target-counter (first pass) vs explicit
+        resolved page numbers (second pass with grid layout).
+      - Hard normalization against ebook CSS.
+      - Verse, cast, work-description styling.
+
+5.6. PDF Rendering / Optimization / Preflight (pipeline/_render.py)
+    - write_build(), render_pdf() — WeasyPrint.
+    - optimize_pdf() — pikepdf compression + linearization.
+    - subset_pdf() — PyMuPDF first-N-pages extraction.
+    - draw_vector_runner_rules() — post-render vector rule drawing.
+    - resolve_toc_page_numbers() — second-pass explicit page-number TOC.
+    - preflight_pdf(): comprehensive QA — A4 size, fonts, images, line spills,
+      header clearance, narrow columns, blank artifacts, duplicate titles,
+      opener warnings, TOC sanity, first body folio, work description styles,
+      orphan/widow detection.
+    - render_selected_pages() — PNG page renders for visual inspection.
+    - analyze_header_clearance(), analyze_work_description_style(),
+      analyze_narrow_columns() — individual QA heuristics.
+5.8. AI Integration (pipeline/_ai.py)
+    Supports two providers: OpenAI and DeepSeek. Four AI-assisted features:
+
+    a) Book Structure Planning (apply_openai_book_plan):
+       Sends spine documents in batches (24 at a time) with headings, text
+       samples, and local heuristic flags. Returns JSON classification:
+       kind, remove_document, major_title, current_division, confidence.
+       Uses structured JSON schema for OpenAI, JSON mode for DeepSeek.
+
+    b) Image Classification (ai_image_decision):
+       Per-image decision: keep authorial/functional vs remove publisher plates.
+       Returns JSON with keep/reason/confidence. Only applied with confidence ≥ 0.70.
+
+    c) Visual QA (openai_visual_qa):
+       Sends rendered PNG page images (base64-encoded) to vision model with a
+       comprehensive 9-category QA prompt. Returns PASS/FAIL + findings.
+
+    d) Text QA (ai_text_qa):
+       Sends extracted PDF text + local QA reports to text-only model for
+       structural/textual review. Can generate regex rule suggestions stored
+       as YAML review files (*.review.yaml). Works with both providers.
+
+5.9. Auto-Fix System (pipeline/_pipeline.py: auto_fix_settings())
+    Reads QA verdict flags and applies safe CSS/config adjustments:
+      - Header collisions → increase runner_body_clearance_mm (+2mm).
+      - Body typography warnings → enable justify, enable hyphenation,
+        increase line_height (+0.025).
+      - Title placement issues → increase subdivision_margin_bottom (+1.2mm),
+        major_opener_bottom_margin (+2mm).
+      - TOC issues → increase toc_line_height (+0.02), toc_entry_gap (+0.4mm).
+      - Non-auto-fixable issues (folios, images, poetry, blanks) logged for
+        human review only.
+    Runs up to --max-auto-fix-passes iterations (default 1), re-rendering PDF
+    each pass with updated settings.
+
+5.10. Rule-Pack System (pipeline/_rule_packs.py)
+    External YAML files in rules/ directory extend the 13 rule-pack keys at
+    runtime. apply_rule_packs() compiles each new pattern with the existing
+    one using alternation. No Python code required — just add regex lines to
+    YAML files.
+
+5.11. Plugin System (pipeline/_plugins.py)
+    Python modules in plugins/ directory auto-discovered by discover_plugins().
+    Registration API:
+      - register_cleaner(fn)      — custom HTML cleaners
+      - register_classifier(fn)   — custom spine-doc classifiers
+      - register_regex_patterns() — extend built-in regexes
+      - register_qa_check(fn)     — custom QA checks
+      - register_post_processor(fn) — custom PDF post-processors
+
+5.12. DAG Executor (pipeline/_dag.py)
+    PipelineDAG with Stage nodes. Each stage has:
+      - name: unique identifier
+      - depends_on: list of prerequisite stage names
+      - runner: callable(context) -> dict of output values
+      - cache_key: optional callable(context) -> str for content-addressed caching
+    Topological sort (Kahn's algorithm) determines execution order.
+    PipelineContext holds all shared state across stages.
+
+5.13. Content-Addressed Cache (pipeline/_cache.py)
+    PipelineCache stores/loads intermediate results keyed by SHA-256 hash.
+    Cache structure: <artifact_root>/.pipeline_cache/<namespace>/<first-2-chars>/<full-hash>
+    Supports pickle objects, text strings, and JSON.
+    Six cache namespaces: doc_clean, ai_plan, css, toc_numbers, page_renders, qa_verdict.
+
+5.14. Configuration System (pipeline/_config.py)
+    Three-layer override precedence:
+      1. Built-in Settings defaults (pipeline/_models.py)
+      2. YAML/JSON config file (--config)
+      3. Explicit CLI flags
+    load_config(): reads YAML or JSON, ignores unknown keys with warning.
+    apply_cli_overrides(): maps ~30 CLI flags to Settings fields.
+    write_default_config(): generates complete editable YAML config.
+
+3.10. Build Orchestrator (Lines ~3440-3520)
+     build_pipeline():
+       1. Parse EPUB path, resolve output/artifact directories.
+       2. Apply config + CLI overrides.
+       3. Show sample-first warning if not using --sample-pages.
+       4. Load rule packs from YAML files.
+       5. Run build_once() up to max_auto_fix_passes + 1 times.
+       6. Write build_summary.json.
+       7. Print summary to stdout.
+       8. In --strict mode, exit non-zero if blockers remain.
+       9. Clean up build HTML unless --debug-html.
+
+     build_once():
+       1. Read EPUB, infer title.
+       2. Scan spine items, run heuristic classification.
+       3. Optionally apply OpenAI book plan.
+       4. Copy image assets, prepare embedded fonts.
+       5. Process each non-removed document through clean_document().
+       6. Skip title-only fragments.
+       7. Compose HTML+CSS, render PDF.
+       8. Resolve TOC page numbers (second pass if successful).
+       9. Subset PDF for sample mode.
+       10. Draw vector runner rules post-render.
+       11. Optimize PDF with pikepdf.
+       12. Run preflight QA.
+       13. Optionally run AI text QA and/or visual QA.
+       14. Return verdict, paths.
+
+3.11. Rule Pack System
+     External YAML files in rules/ directory can extend any of the 13 built-in
+     regex patterns. The generic_epub.yaml adds patterns for Delphi-specific
+     promo phrases, plate captions, functional image clues, and publisher
+     image source clues. AI-generated suggestions are written as .review.yaml
+     files that must be manually reviewed before loading.
+
+3.12. Sample-First Workflow
+     The pipeline strongly encourages building a small sample first:
+       --sample-pages 50 builds ~50 pages
+       --full-without-sample bypasses warning
+       --no-sample-requirement disables warning in config
+     Sample mode uses word budget estimation to stop body collection before
+     expensive PDF layout, then subsets the rendered PDF.
+
+3.13. Strict Mode
+     --strict exits with non-zero exit code if any QA blockers remain.
+     Blockers include: non-A4 pages, dark pages, blank-page artifacts,
+     header collisions, line spills, TOC duplicates, empty content pages,
+     duplicate title pages, opener page warnings, AI flags.
+
+================================================================================
+END OF SUMMARY
+================================================================================

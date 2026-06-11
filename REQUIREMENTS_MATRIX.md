@@ -28,6 +28,7 @@ Legend:
 | Header/rule clearance QA | Implemented + auto-fix | `analyze_header_clearance()`, `auto_fix_settings()` |
 | Folio suppression on blanks/title/display pages | Implemented for blank/title/openers partly | CSS page types; manual QA for unusual display pages |
 | Major work openers formal and recto | Implemented | `h1.major-work`, synthetic openers |
+| Editorial work descriptions after collected-work titles | Implemented + QA | `mark_major_work_descriptions()`, `mark_standalone_work_description_fragment()`, `.work-description`, `analyze_work_description_style()` |
 | Ordinary chapters not forced to new pages | Implemented | h2/h3 rules do not use recto starts except act openings |
 | Heading orphan prevention | Implemented partly | `break-after: avoid` |
 | Paragraphs remain breakable | Implemented | no `break-inside: avoid` on ordinary `p` |
@@ -77,4 +78,41 @@ The script is intentionally strict, but no local automation can guarantee all of
 5. very complex dramatic/verse-drama layouts;
 6. malformed scholarly apparatus, line-numbered philology, timelines, pronunciation guides, or tables.
 
-The project therefore treats QA renders, `qa_report.txt`, `qa_verdict.json`, and optional `openai_visual_qa.txt` as part of the production process, not as afterthoughts.
+| Auto-fix system for safe CSS/config adjustments | Implemented | `auto_fix_settings()` in `_pipeline.py` |
+| Content-addressed caching (SHA-256) | Implemented | `PipelineCache` in `_cache.py` |
+| DAG-based execution with per-stage caching | Implemented | `PipelineDAG`, `Stage`, cache keys in `_dag.py`, `_pipeline.py` |
+| Python plugin system (cleaners, classifiers, QA, post-processors) | Implemented | `_plugins.py`, `discover_plugins()` |
+| YAML rule-pack system extending built-in regexes | Implemented | `_rule_packs.py`, `rules/generic_epub.yaml` |
+| Dual AI provider support (OpenAI + DeepSeek) | Implemented | `_ai.py` |
+| DeepSeek text QA with regex rule-suggestion generation | Implemented | `ai_text_qa()`, `write_review_rule_suggestions()` |
+| `python -m pipeline` package entry point | Implemented | `__main__.py` |
+| Second-pass TOC page-number resolution | Implemented | `resolve_toc_page_numbers()` in `_render.py` |
+| Vector runner-rule drawing (post-render) | Implemented | `draw_vector_runner_rules()` in `_render.py` |
+| Work description style QA (italic + size verification) | Implemented + QA | `analyze_work_description_style()` in `_render.py` |
+| First body folio verification | Implemented + QA | `preflight_pdf()` in `_render.py` |
+| Orphan/widow detection | Implemented + QA | `QAVerdict.possible_orphan_pages` |
+| Drop caps at chapter starts | Implemented | `drop_caps` setting, CSS |
+| Small-caps normalization for abbreviations | Implemented | `small_caps` setting, CSS |
+| Ligature control (`common`/`none`/`all`/`discretionary`) | Implemented | `ligature_setting` setting, CSS |
+| Footnote handling (`auto`/`endnotes-only`/`disabled`) | Implemented | `footnote_handling` setting |
+| `--no-cache` flag to bypass caching | Implemented | `--no-cache` CLI flag |
+| `--ai-provider` selection (openai/deepseek/none) | Implemented | `--ai-provider` CLI flag |
+| `--no-text-qa` to disable AI text QA | Implemented | `--no-text-qa` CLI flag |
+| `--no-drop-caps` / `--no-small-caps` | Implemented | CLI flags |
+| `--ligature-setting` / `--footnote-handling` | Implemented | CLI flags |
+| `--runner-letter-spacing` | Implemented | `runner_letter_spacing_em` setting |
+| Configurable front-matter margins | Implemented | `front_margin_top_mm`, `front_margin_bottom_mm` settings |
+
+## New architectural components
+
+| Component | Description |
+|---|---|
+| `pipeline/` package | Modular refactoring of the original single script into 15 focused modules |
+| DAG executor | Topologically-sorted stage execution with dependency resolution |
+| Content-addressed cache | SHA-256 keyed intermediate results avoid redundant rework |
+| Plugin system | Python-based extension hooks discovered from `plugins/` directory |
+| Rule-pack system | YAML-based regex extension without Python code |
+| Dual AI providers | OpenAI for vision/planning, DeepSeek for text QA + rule suggestions |
+| Auto-fix engine | Deterministic re-render loop adjusting CSS/config from QA verdicts |
+
+The project therefore treats QA renders, `qa_report.txt`, `qa_verdict.json`, `openai_visual_qa.txt`, `deepseek_text_qa.txt`, and `deepseek_rule_suggestions.review.yaml` as part of the production process, not as afterthoughts.

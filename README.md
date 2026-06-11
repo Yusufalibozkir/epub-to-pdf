@@ -2,27 +2,38 @@
 
 This project converts an EPUB into a single-page A4 print-oriented PDF for a deluxe physical book interior. It is designed for large public-domain collected works, not quick ebook export.
 
-It implements a stricter version of the earlier starter script:
+It is implemented as a modular Python package (`pipeline/`) with a DAG-based execution engine, content-addressed caching, and a plugin system.
+
+**Key features:**
 
 - A4 single-page PDF output
-- half title, title page, source page, and generated contents
-- roman front-matter pagination and Arabic main pagination
-- recto starts for title/TOC/main/major works where CSS paged media supports them
-- true `@page :blank` suppression of runners/folios on generated blank pages
-- separate `@page body:left` and `@page body:right` running-head logic
-- collection title on verso, current major work/division on recto
-- conservative promotional/local mini-TOC removal
-- image/caption classification with functional-image preservation
-- poetry block conversion from `<br>` lineation and short-line sequences
-- basic verse hanging indents for runover lines
-- drama/cast-list detection and styling
-- typographic cleanup: non-breaking-space cleanup, ellipses, dashes, double spaces
-- note-reference superscripting
+- Half title, title page, source page, and generated table of contents
+- Roman front-matter pagination and Arabic main pagination
+- Recto starts for title/TOC/main/major works where CSS paged media supports them
+- True `@page :blank` suppression of runners/folios on generated blank pages
+- Separate `@page body:left` and `@page body:right` running-head logic
+- Collection title on verso, current major work/division on recto
+- Conservative promotional/local mini-TOC removal
+- Image/caption classification with functional-image preservation
+- Poetry block conversion from `<br>` lineation and short-line sequences
+- Verse hanging indents for runover lines
+- Drama/cast-list detection and styling
+- Delphi-style collected-works apparatus styling: subtitles stay roman, editorial descriptions become smaller italic text
+- Compact in-work heading stacks such as `PART I` / `CHAPTER I` / `INTRODUCTION`
+- Typographic cleanup: non-breaking-space cleanup, ellipses, dashes, double spaces
+- Note-reference superscripting
 - PDF optimization with pikepdf
-- PyMuPDF preflight: page size, font inventory, dark pages, blank-page artifacts, line-spill heuristics, header/body clearance, narrow-column detection
-- optional OpenAI structure planning, image classification, and visual QA
+- PyMuPDF preflight: page size, font inventory, dark pages, blank-page artifacts, line-spill heuristics, header/body clearance, narrow-column detection, work description style checks
+- Vector runner-rule drawing (post-render)
+- Second-pass TOC page-number resolution
+- Auto-fix system: deterministic CSS/config adjustments with re-render passes
+- Optional AI assistance (OpenAI **or** DeepSeek): structure planning, image classification, visual QA, and text QA with regex rule-suggestion generation
+- **Plugin system**: Python-based extension hooks for custom cleaners, classifiers, QA checks, and post-processors
+- **Rule-pack system**: YAML files extending the 13 built-in regex patterns
+- **DAG-based execution**: cached, dependency-ordered processing stages
+- **Content-addressed caching**: SHA-256 keyed intermediate results avoid redundant work
 - `--strict` mode that fails if delivery-blocking QA warnings remain
-- machine-readable `qa_verdict.json` and `build_summary.json` in per-run artifact folders
+- Machine-readable `qa_verdict.json` and `build_summary.json` in per-run artifact folders
 
 ## Installation
 
@@ -33,6 +44,53 @@ pip install -r requirements.txt
 ```
 
 WeasyPrint may require system dependencies depending on your OS. Install WeasyPrint according to its official platform instructions if `pip install` alone is not enough.
+
+## Package structure
+
+The project is implemented as the `pipeline/` Python package plus a thin backward-compatible wrapper script:
+
+| Path | Purpose |
+|---|---|
+| `pipeline/` | Modular package — CLI, config, DAG executor, cache, cleaners, CSS, render, QA, AI, plugins, rule packs |
+| `deluxe_epub_to_pdf.py` | Thin wrapper around `pipeline._cli` / `pipeline._pipeline` (original single-script entry point) |
+| `rules/` | YAML rule-pack files extending built-in regex patterns |
+| `plugins/` _(optional)_ | Python plugin modules for custom cleaners, classifiers, QA checks, etc. |
+
+Run via the wrapper **or** directly as a package:
+
+```powershell
+python deluxe_epub_to_pdf.py "book.epub" --out "sample.pdf" --sample-pages 50
+python -m pipeline "book.epub" --out "sample.pdf" --sample-pages 50
+```
+
+## DAG-based execution & caching
+
+The pipeline uses a directed-acyclic-graph (DAG) executor with per-stage cache keys (SHA-256 content-addressed). Stages that detect no input changes are served from cache, making iterative config tweaks much faster.
+
+## Plugin system
+
+Python modules placed in a `plugins/` directory are auto-discovered. Each module can register hooks:
+
+- `register_cleaners()` — custom HTML cleaners
+- `register_classifiers()` — custom spine-doc classifiers
+- `register_regex_patterns()` — extend built-in regex patterns
+- `register_qa_checks()` — custom PDF QA checks
+- `register_post_processors()` — custom PDF post-processing
+
+## Rule-pack system
+
+YAML files in `rules/` (configured via `rule_packs` setting) extend the 13 built-in regex patterns at runtime — no Python code required.
+
+## AI providers: OpenAI & DeepSeek
+
+The pipeline supports two AI providers:
+
+| Provider | Use cases |
+|---|---|
+| **OpenAI** (default) | Structure planning, image classification, visual QA |
+| **DeepSeek** | Structure planning, text QA with regex rule-suggestion generation |
+
+Set the provider with `--ai-provider deepseek` and configure `$env:DEEPSEEK_API_KEY`.
 
 ## Recommended workflow
 
@@ -47,7 +105,7 @@ Review:
 - `output/sample.pdf`
 - `artifacts/sample/qa_report.txt`
 - `artifacts/sample/qa_verdict.json`
-- `artifacts/sample/openai_visual_qa.txt` if used
+- `artifacts/sample/openai_visual_qa.txt` or `deepseek_text_qa.txt` if used
 - rendered page images in `artifacts/sample/qa/`
 - generated HTML/CSS in `artifacts/sample/build/` when `--debug-html` is used
 
@@ -66,10 +124,10 @@ python deluxe_epub_to_pdf.py "book.epub" --out "full_print.pdf" --full-without-s
 
 ## Configuration file
 
-The pipeline now supports a YAML or JSON config file. Missing keys keep the built-in deluxe defaults. The override order is:
+The pipeline supports YAML or JSON config files. Missing keys keep the built-in defaults. Override order:
 
 ```text
-built-in defaults -> config file -> explicit command-line flags
+built-in defaults → config file → explicit command-line flags
 ```
 
 Generate a complete editable config:
@@ -91,10 +149,10 @@ Book titles are read from EPUB metadata automatically. Use `--title "Clean Title
 Quick command-line overrides still work and take priority over the config:
 
 ```powershell
-python deluxe_epub_to_pdf.py "book.epub" --config my_style.yaml --body-size 12 --line-height 1.28 --font-family '"EB Garamond", Garamond, Georgia, serif' --sample-pages 50
+python deluxe_epub_to_pdf.py "book.epub" --config my_style.yaml --body-size 12 --line-height 1.28 --sample-pages 50
 ```
 
-Common config keys include `body_size_pt`, `line_height`, `font_stack`, `margin_top_mm`, `margin_side_mm`, `margin_bottom_mm`, `runner_font_pt`, `folio_font_pt`, `runner_rule_y_mm`, `runner_title_top_mm`, `runner_body_clearance_mm`, `paragraph_indent_em`, `verse_line_height`, `verse_max_width_mm`, and `image_policy`. See `deluxe_config.example.yaml` for the full list.
+Common config keys include `body_size_pt`, `line_height`, `font_stack`, `margin_top_mm`, `margin_side_mm`, `margin_bottom_mm`, `runner_font_pt`, `folio_font_pt`, `runner_rule_y_mm`, `runner_title_top_mm`, `runner_body_clearance_mm`, `paragraph_indent_em`, `work_description_font_delta_pt`, `work_description_bottom_margin_mm`, `part_heading_font_pt`, `chapter_section_font_pt`, `verse_line_height`, `verse_max_width_mm`, and `image_policy`. See `deluxe_config.example.yaml` for the full list.
 
 The default typography is EB Garamond. The project embeds local font files from `fonts/` by default, controlled by `embed_font_files`, `font_dir`, `embedded_font_family`, `embedded_font_regular`, `embedded_font_italic`, and `embedded_font_weight`. This prevents WeasyPrint from silently falling back to Times New Roman or a system Garamond when EB Garamond is not installed.
 
@@ -136,6 +194,8 @@ python deluxe_epub_to_pdf.py "book.epub" --config my_style.yaml --ai-provider de
 ```
 
 With `--ai-provider deepseek`, the script runs the normal local QA first, then writes `deepseek_text_qa.txt`. Safe text-QA findings can trigger the same bounded rerender loop controlled by `--max-auto-fix-passes`, for example body line-height, justification, chapter-title spacing, TOC spacing, or runner clearance. If DeepSeek suggests regex cleanup rules, they are written to `deepseek_rule_suggestions.review.yaml` for human review; they are not loaded automatically.
+
+Local QA also checks rendered PDF font names and point sizes for detected editorial work descriptions. DeepSeek can review those local warnings and extracted text patterns, but it cannot directly see italics unless local QA reports the style problem.
 
 Reviewed regex rule packs live in `rules/` and are configured with `rule_pack_dir` and `rule_packs`. The default `rules/generic_epub.yaml` extends the built-in conservative cleanup regexes.
 

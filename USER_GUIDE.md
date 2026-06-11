@@ -15,6 +15,7 @@ The pipeline tries to automate the production rules in the deluxe EPUB-to-PDF pr
 - Suppression of runners and folios on title/display/blank pages.
 - Removal of obvious promotional/catalogue material and repeated local mini-contents blocks.
 - Heuristic preservation/removal of EPUB images according to whether they are functional/authorial or publisher-added plates.
+- Delphi-style work subtitles and editorial descriptions: subtitles stay roman, while non-authorial descriptive blurbs after work titles are styled as smaller italic apparatus.
 - Basic poetry, verse, drama, cast-list, and note-reference normalization.
 - PDF optimization and QA reporting.
 - Optional OpenAI-assisted structure planning, image classification, and visual page review.
@@ -37,20 +38,37 @@ For that reason, a sample-first workflow is strongly recommended.
 
 ## 3. Package contents
 
-The package contains these main files:
+The project is now implemented as a modular Python package with a thin wrapper script:
 
-| File | Purpose |
+| File / folder | Purpose |
 |---|---|
-| `deluxe_epub_to_pdf.py` | Main conversion script. |
+| `pipeline/` | Main Python package — 15 modules covering CLI, config, DAG executor, cache, cleaners, CSS, fonts, render, QA, AI, rule packs, and plugins. |
+| `deluxe_epub_to_pdf.py` | Thin wrapper script around `pipeline/` (backward compatible). |
+| `rules/` | YAML rule-pack files extending built-in regex patterns. |
+| `plugins/` | _(Optional)_ Python plugin modules for custom cleaners, classifiers, QA checks, etc. |
 | `requirements.txt` | Python dependencies. |
 | `README.md` | Short project overview. |
 | `USAGE_WINDOWS.md` | Quick Windows command examples. |
 | `deluxe_config.example.yaml` | Editable configuration template. |
 | `REQUIREMENTS_MATRIX.md` | Mapping between the prompt requirements and implementation status. |
 | `MANUAL_QA_CHECKLIST.md` | Human visual QA checklist before printing. |
+| `CLI_OPTIONS_REFERENCE.txt` | Quick reference for all command-line flags. |
+| `SCRIPT_SUMMARY.txt` | Detailed architecture summary of the pipeline package. |
 | `install_windows.ps1` | Simple Windows install helper. |
-| `run_sample_example.ps1` | Example sample-build command. |
+| `run.bat` | Double-click to open a PowerShell terminal with venv activated, ready for commands. |
 | `USER_GUIDE.md` | This guide. |
+
+### Entry points
+
+You can run the pipeline in either of two equivalent ways:
+
+```powershell
+# Original wrapper script (backward-compatible)
+python deluxe_epub_to_pdf.py "book.epub" --config my_style.yaml --out "sample.pdf" --sample-pages 50
+
+# Package entry point (same behavior)
+python -m pipeline "book.epub" --config my_style.yaml --out "sample.pdf" --sample-pages 50
+```
 
 ---
 
@@ -103,9 +121,9 @@ Recommended sequence:
 1. Generate or edit a config file.
 2. Build a 30–50 page sample.
 3. Inspect the sample PDF and `qa/` page renders.
-4. Check `qa_report.txt`, `qa_verdict.json`, and, if used, `openai_visual_qa.txt`.
+4. Check `qa_report.txt`, `qa_verdict.json`, and any AI QA output files.
 5. Adjust config values such as font size, line height, margins, runner spacing, or image policy.
-6. Rebuild the sample.
+6. Rebuild the sample (cached stages will skip redundant work).
 7. Only then build the full PDF.
 8. Run full-book QA and inspect representative pages.
 
@@ -115,9 +133,22 @@ This mirrors professional book production: sample → correction → full build 
 
 ## 7. Quick start: first sample build
 
+### Option A — double-click `run.bat`
+
+Double-click `run.bat` in the project folder. It creates the virtual environment, installs dependencies, and opens a PowerShell terminal with everything ready. Then type:
+
+```powershell
+python deluxe_epub_to_pdf.py "book.epub" --out "sample.pdf" --sample-pages 50 --debug-html
+```
+
+### Option B — manual
+
 From inside the project folder:
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
 python deluxe_epub_to_pdf.py "book.epub" --out "sample.pdf" --sample-pages 50 --debug-html
 ```
 
@@ -127,16 +158,18 @@ The important outputs are:
 
 | Output | Meaning |
 |---|---|
-| `sample.pdf` | The PDF sample. |
-| `qa_report.txt` | Human-readable QA report. |
-| `qa_verdict.json` | Machine-readable QA result. |
-| `build_summary.json` | Settings and summary of the build. |
-| `qa/` | Rendered page images for visual inspection. |
-| `_build_sample/` or similar | Generated HTML/CSS when `--debug-html` is used. |
+| `output/sample.pdf` | The PDF sample. |
+| `artifacts/sample/qa_report.txt` | Human-readable QA report. |
+| `artifacts/sample/qa_verdict.json` | Machine-readable QA result. |
+| `artifacts/sample/build_summary.json` | Final settings and summary of the build. |
+| `artifacts/sample/qa/` | Rendered page images for visual inspection. |
+| `artifacts/sample/build/` | Generated HTML/CSS when `--debug-html` is used. |
 
 ---
 
-## 8. Quick start with OpenAI assistance
+## 8. Quick start with AI assistance
+
+### OpenAI (default provider)
 
 Set your OpenAI API key in PowerShell:
 
@@ -150,9 +183,16 @@ Run a sample with OpenAI structure planning and visual QA:
 python deluxe_epub_to_pdf.py "book.epub" --out "sample_ai.pdf" --sample-pages 50 --use-openai --openai-qa --debug-html
 ```
 
-This mode lets OpenAI help classify EPUB sections and review rendered page images.
+### DeepSeek (text QA + rule suggestions)
 
-Use this first before enabling image-by-image OpenAI checks.
+Set your DeepSeek API key and use the deepseek provider:
+
+```powershell
+$env:DEEPSEEK_API_KEY="sk-your-key-here"
+python deluxe_epub_to_pdf.py "book.epub" --out "sample_ds.pdf" --sample-pages 50 --ai-provider deepseek --use-openai --max-auto-fix-passes 2 --debug-html
+```
+
+DeepSeek text QA generates `deepseek_text_qa.txt` and `deepseek_rule_suggestions.review.yaml`. The `.review.yaml` file contains regex pattern suggestions that must be manually reviewed before loading via `rules/generic_epub.yaml`.
 
 ---
 
@@ -254,10 +294,26 @@ Suggested starting ranges:
 | Standard readable A4 classics | 11.5–12.2 pt | 1.22–1.30 |
 | Spacious deluxe edition | 12.3–13.0 pt | 1.28–1.38 |
 
+### Typographic refinements
+
+```yaml
+drop_caps: true
+small_caps: true
+ligature_setting: "common"
+footnote_handling: "auto"
+```
+
+| Key | Meaning |
+|---|---|
+| `drop_caps` | Decorative drop caps at chapter starts. |
+| `small_caps` | Automatic small-caps normalization for common abbreviations. |
+| `ligature_setting` | CSS `font-variant-ligatures`: `common`, `none`, `all`, `discretionary`. |
+| `footnote_handling` | How to treat inline footnote bodies in malformed EPUBs: `auto`, `endnotes-only`, `disabled`. |
+
 ### Margins and live area
 
 ```yaml
-margin_top_mm: 28.0
+margin_top_mm: 24.0
 margin_side_mm: 22.0
 margin_bottom_mm: 25.0
 front_margin_top_mm: 25.0
@@ -269,17 +325,24 @@ front_margin_bottom_mm: 24.0
 | `margin_top_mm` | Top text-area margin for main pages. Increase if runner/body clearance is tight. |
 | `margin_side_mm` | Equal left/right margin. Baseline uses equal margins, not mirrored gutter margins. |
 | `margin_bottom_mm` | Bottom margin. Affects folio space and page density. |
-| `front_margin_top_mm` | Front-matter top margin. |
-| `front_margin_bottom_mm` | Front-matter bottom margin. |
+| `front_margin_top_mm` | Front-matter top margin (override for roman-numeral pages). |
+| `front_margin_bottom_mm` | Front-matter bottom margin (override for roman-numeral pages). |
 
 ### Running heads and folios
 
 ```yaml
 runner_font_pt: 9.4
 runner_letter_spacing_em: 0.04
-runner_rule_gap_mm: 3.0
+runner_rule_gap_mm: 3.2
+runner_body_clearance_mm: 6.0
+runner_rule_y_mm: 17.0
+runner_title_top_mm: 8.5
 runner_rule_weight_pt: 0.45
-runner_rule_color: "#777"
+runner_rule_color: "#222"
+runner_layout: "right_title_full_rule"
+runner_rule_style: "full_width"
+runner_collection_transform: "none"
+runner_work_transform: "uppercase"
 folio_font_pt: 10.0
 front_folio_font_pt: 9.3
 ```
@@ -288,9 +351,16 @@ front_folio_font_pt: 9.3
 |---|---|
 | `runner_font_pt` | Running-head text size. |
 | `runner_letter_spacing_em` | Letter spacing for running heads. |
-| `runner_rule_gap_mm` | Clearance around the runner rule. Increase if the rule looks like an overline. |
-| `runner_rule_weight_pt` | Thickness of the runner rule. |
-| `runner_rule_color` | Runner rule color. |
+| `runner_rule_gap_mm` | CSS clearance around the runner rule. |
+| `runner_body_clearance_mm` | Extra gap between runner-rule area and body text. |
+| `runner_rule_y_mm` | Y-position of the vector runner rule from top trim. |
+| `runner_title_top_mm` | Y-offset of running-head text from top trim. |
+| `runner_rule_weight_pt` | Thickness of the vector runner rule stroke. |
+| `runner_rule_color` | Runner rule stroke colour. |
+| `runner_layout` | Layout variant: `right_title_full_rule`, `centered_single_rule`, `dual_full_rule`, `alternating`. |
+| `runner_rule_style` | Rule rendering: `full_width`, `single`, `split`, `none`. |
+| `runner_collection_transform` | CSS `text-transform` for the verso (collection-title) runner. |
+| `runner_work_transform` | CSS `text-transform` for the recto (current-work) runner. |
 | `folio_font_pt` | Page number size in main matter. |
 | `front_folio_font_pt` | Page number size in front matter. |
 
@@ -299,6 +369,7 @@ If the header line is too close to the body text, first try:
 ```yaml
 margin_top_mm: 31.0
 runner_rule_gap_mm: 3.8
+runner_body_clearance_mm: 8.0
 ```
 
 ### Paragraphs and block quotations
@@ -322,7 +393,16 @@ major_opener_top_margin_mm: 55.0
 major_opener_bottom_margin_mm: 15.0
 major_work_font_pt: 23.5
 collection_division_font_pt: 25.0
+work_description_font_delta_pt: -1.0
+work_description_bottom_margin_mm: 7.0
+part_heading_font_pt: 11.6
+part_heading_margin_bottom_mm: 6.0
+chapter_section_font_pt: 11.6
+chapter_section_margin_top_mm: 5.0
+chapter_section_margin_bottom_mm: 3.0
 subdivision_font_pt: 14.8
+subdivision_margin_top_mm: 10.0
+subdivision_margin_bottom_mm: 5.0
 h3_font_pt: 13.0
 minor_heading_font_pt: 11.4
 ```
@@ -332,10 +412,26 @@ minor_heading_font_pt: 11.4
 | `major_opener_top_margin_mm` | Top whitespace before major work titles. |
 | `major_opener_bottom_margin_mm` | Space after major work titles. |
 | `major_work_font_pt` | Font size for major work openers. |
-| `collection_division_font_pt` | Font size for parent divisions such as “The Novels.” |
+| `collection_division_font_pt` | Font size for parent divisions such as "The Novels". |
 | `subdivision_font_pt` | Font size for h2/subdivision headings. |
+| `subdivision_margin_top_mm` | Top margin for h2/subdivision headings. |
+| `subdivision_margin_bottom_mm` | Bottom margin for h2/subdivision headings. |
 | `h3_font_pt` | Font size for h3 headings. |
 | `minor_heading_font_pt` | Font size for minor headings. |
+
+`work_description_font_delta_pt` controls how much smaller editorial work descriptions are than body text; `-1.0` means one point smaller. `work_description_bottom_margin_mm` controls the gap after that editorial description before the author's text begins.
+
+`part_heading_font_pt` and `part_heading_margin_bottom_mm` control compact in-work labels such as `PART I`. `chapter_section_font_pt`, `chapter_section_margin_top_mm`, and `chapter_section_margin_bottom_mm` control compact labels such as `INTRODUCTION` that appear below `CHAPTER I`. These are separate from major work opener pages such as `THE VILLAGE OF STEPANCHIKOVO`.
+
+Collected/complete-works EPUBs, especially Delphi editions, often put non-authorial editorial blurbs after each work title. The pipeline treats these as apparatus, not as the author's opening text. Common supported patterns include:
+
+```text
+WORK TITLE -> editorial description
+WORK TITLE -> short subtitle -> editorial description
+WORK TITLE -> short subtitle -> long editorial description -> short standalone editorial note
+```
+
+For example, `AN INCOMPLETE NOVEL` remains a normal roman subtitle, while paragraphs such as `Netochka Nezvanova is Dostoyevsky's first...` or `A sketch of the Petrashevsky Circle...` are styled as `work-description`: italic, smaller than body text, unindented, and separated from the following chapter text. Local PDF QA checks these descriptions by inspecting rendered font names and point sizes; DeepSeek text QA can review those local warnings but cannot directly see italics from images.
 
 ### Table of contents
 
@@ -537,6 +633,22 @@ These override both built-in defaults and the config file.
 
 Use only one of them.
 
+### Typography refinements
+
+```powershell
+--no-drop-caps
+--no-small-caps
+--ligature-setting common
+--footnote-handling auto
+```
+
+| Flag | Meaning |
+|---|---|
+| `--no-drop-caps` | Disables decorative drop caps at chapter starts. |
+| `--no-small-caps` | Disables small-caps normalization for abbreviations. |
+| `--ligature-setting` | CSS `font-variant-ligatures`: `common`, `none`, `all`, `discretionary`. |
+| `--footnote-handling` | Inline footnote handling: `auto`, `endnotes-only`, `disabled`. |
+
 ### Cleanup and output options
 
 ```powershell
@@ -544,6 +656,7 @@ Use only one of them.
 --no-optimize
 --no-qa-render
 --debug-html
+--no-cache
 ```
 
 | Flag | Meaning |
@@ -552,6 +665,7 @@ Use only one of them.
 | `--no-optimize` | Skips pikepdf optimization. Use only for debugging. |
 | `--no-qa-render` | Does not render PNG QA pages. Faster, but less safe. |
 | `--debug-html` | Keeps generated HTML/CSS build folder. Very useful for troubleshooting. |
+| `--no-cache` | Disables content-addressed caching. Use when iterating on rule-pack or plugin changes. |
 
 ### Strictness and auto-fix
 
@@ -563,41 +677,96 @@ Use only one of them.
 | Flag | Meaning |
 |---|---|
 | `--strict` | Exits with an error if delivery-blocking QA warnings remain. |
-| `--max-auto-fix-passes` | Number of deterministic regeneration attempts after fixable warnings, such as header collisions. |
+| `--max-auto-fix-passes` | Number of deterministic regeneration attempts after fixable warnings, such as header collisions. Each pass re-runs QA. |
 
-### OpenAI options
+### AI provider options
 
 ```powershell
+--ai-provider openai
 --use-openai
 --openai-model gpt-5.4-mini
+--deepseek-model deepseek-chat
 --openai-image-check
 --openai-qa
 --openai-qa-pages 10
+--ai-qa-pages 50
+--no-text-qa
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--use-openai` | Uses OpenAI for whole-book structure planning. Recommended for complex EPUBs. |
-| `--openai-model` | Model name used for OpenAI calls. |
-| `--openai-image-check` | Uses OpenAI to classify each image/caption block. More expensive on image-heavy EPUBs. |
-| `--openai-qa` | Sends rendered QA pages to OpenAI for visual review. |
-| `--openai-qa-pages` | Maximum number of rendered pages sent to OpenAI visual QA. |
+| `--ai-provider` | Provider for AI tasks: `openai`, `deepseek`, or `none`. Default: `openai`. |
+| `--use-openai` | Use the selected AI provider for whole-book structure planning. |
+| `--openai-model` | Model for OpenAI structure/image/visual QA. |
+| `--deepseek-model` | Model for DeepSeek structure/text QA. |
+| `--openai-image-check` | Uses AI to classify each image/caption block. More expensive on image-heavy EPUBs. |
+| `--openai-qa` | Sends rendered QA pages to AI vision for visual review. |
+| `--openai-qa-pages` | Maximum rendered pages sent to visual QA. |
+| `--ai-qa-pages` | Maximum PDF pages scanned for AI text QA (plus work-opening pages). |
+| `--no-text-qa` | Disable AI text QA (e.g., DeepSeek post-local-QA review). |
 
 ---
 
-## 13. Understanding the output files
+## 13. DAG-based pipeline execution & caching
+
+The pipeline uses a **directed-acyclic-graph (DAG)** executor. Each processing stage (title resolution, EPUB scan, AI planning, font prep, document cleaning, HTML/CSS composition, rendering, TOC resolution, post-processing, QA) is a named node with explicit dependencies. The executor topologically sorts the graph and runs only stages whose inputs have changed.
+
+**Real-time progress**: During execution, each stage prints a live status line to the console:
+
+```
+[ 1/12] Infer book title from EPUB metadata... ✓ 0.8s
+[ 2/12] Read EPUB and extract images... ✓ 1.2s  (cached)
+[ 3/12] Scan and classify spine documents... ✓ 2.1s  (cached)
+[ 4/12] AI structure planning (optional)... ✓ 5.3s
+[ 5/12] Copy fonts for embedding... ✓ 0.1s
+[ 6/12] Clean and normalize all documents... ✓ 12.4s
+[ 7/12] Assemble HTML + CSS and render PDF... ✓ 8.7s
+[ 8/12] Resolve TOC page numbers... ✓ 1.3s
+[ 9/12] Vector rules, subset, optimize... ✓ 0.9s
+[10/12] PDF preflight QA... ✓ 2.5s
+[11/12] AI text QA (optional)... ✓ 0.0s
+[12/12] AI visual QA (optional)... ✓ 0.0s
+```
+
+Cached stages show `(cached)` and skip re-execution. The document-cleaning stage (step 6) also shows per-document progress: `doc 10/48...`.
+
+**Content-addressed caching**: Intermediate results are stored under `artifacts/<run>/.pipeline_cache/` keyed by SHA-256 hashes of their inputs. Stages that detect no input changes are served from cache — making iterative config tweaks significantly faster. Disable with `--no-cache`.
+
+## 14. Plugin system
+
+Python modules placed in a `plugins/` directory are auto-discovered at runtime. Each module can define any of these hooks:
+
+| Hook | Signature | Purpose |
+|---|---|---|
+| `register_cleaners()` | → `list[Callable]` | Custom HTML cleaners during document cleanup |
+| `register_classifiers()` | → `list[Callable]` | Custom spine-doc classifiers |
+| `register_regex_patterns()` | → `dict[str, list[str]]` | Extend built-in regex patterns |
+| `register_qa_checks()` | → `list[Callable]` | Custom PDF QA checks |
+| `register_post_processors()` | → `list[Callable]` | Custom PDF post-processing |
+
+Example: see the plugin system documentation at `pipeline/_plugins.py`.
+
+## 15. Rule-pack system
+
+YAML files in `rules/` (configured via the `rule_packs` setting in your config) extend the 13 built-in regex patterns at runtime — no Python code required. Each YAML key corresponds to a pattern group (e.g., `promo_patterns`, `plate_caption_patterns`, `functional_image_clues`).
+
+AI-generated rule suggestions from DeepSeek text QA are written to `deepseek_rule_suggestions.review.yaml`. These are deliberately **not auto-loaded** — review each pattern manually, then copy approved ones into `rules/generic_epub.yaml`.
+
+## 16. Understanding the output files
 
 After a run, you should usually see:
 
 | File/folder | Purpose |
 |---|---|
-| `your_output.pdf` | Final or sample PDF. |
-| `qa_report.txt` | Main human-readable QA report. Read this first. |
-| `qa_verdict.json` | Structured QA results. Useful for automation. |
-| `build_summary.json` | Build settings, page count, warnings, and auto-fixes. |
-| `openai_visual_qa.txt` | OpenAI visual QA report, only if `--openai-qa` was used. |
-| `qa/` | Rendered page images from the PDF. Inspect these visually. |
-| `_build_<output_name>/` | Generated HTML/CSS/assets, only kept when `--debug-html` is used. |
+| `output/<your_output>.pdf` | Final or sample PDF. |
+| `artifacts/<run>/qa_report.txt` | Main human-readable QA report. Read this first. |
+| `artifacts/<run>/qa_verdict.json` | Structured QA results. Useful for automation. |
+| `artifacts/<run>/build_summary.json` | Build settings, page count, warnings, and auto-fixes. |
+| `artifacts/<run>/openai_visual_qa.txt` | AI visual QA report, only with `--openai-qa`. |
+| `artifacts/<run>/deepseek_text_qa.txt` | DeepSeek text QA report, only with `--ai-provider deepseek`. |
+| `artifacts/<run>/deepseek_rule_suggestions.review.yaml` | AI-generated regex rule suggestions (review before use). |
+| `artifacts/<run>/qa/` | Rendered PNG page images from the PDF. |
+| `artifacts/<run>/build/` | Generated HTML/CSS/assets, only when `--debug-html` is used. |
 
 ### `qa_report.txt`
 
@@ -607,55 +776,49 @@ This summarizes:
 - page-size status;
 - font inventory;
 - image count;
-- removed documents;
-- removed blocks;
+- removed documents and blocks;
 - removed local mini-TOCs;
-- detected poetry blocks;
-- detected cast sections;
+- detected poetry blocks and cast sections;
 - kept/removed images;
-- possible header collisions;
-- possible broken-word/single-letter line spills;
-- possible narrow columns;
+- possible header collisions, line spills, narrow columns;
 - blank-page artifacts;
-- TOC warnings;
-- OpenAI decisions, when used.
+- TOC warnings (duplicates, missing numbers);
+- first body folio status;
+- work description style warnings;
+- orphan/widow warnings;
+- AI decisions and flags, when used.
 
 ### `qa_verdict.json`
 
-This contains machine-readable fields such as:
+Machine-readable fields include:
 
-- `page_count`
-- `non_a4_pages`
-- `possible_line_spills`
-- `dark_pages`
-- `possible_blank_page_artifacts`
-- `possible_header_collisions`
-- `possible_narrow_columns`
-- `toc_page_number_warnings`
-- `fonts_seen`
-- `images_seen`
-- `qa_renders`
-
-If `possible_header_collisions`, `possible_line_spills`, `dark_pages`, or `possible_blank_page_artifacts` are non-empty, inspect carefully.
+- `page_count`, `non_a4_pages`
+- `possible_line_spills`, `dark_pages`
+- `possible_blank_page_artifacts`, `possible_header_collisions`
+- `possible_narrow_columns`, `possible_orphan_pages`
+- `toc_page_number_warnings`, `toc_duplicate_warnings`
+- `work_description_style_warnings`, `first_body_folio_warnings`
+- `fonts_seen`, `images_seen`, `qa_renders`
+- `openai_visual_flags`, `text_qa_flags`
 
 ### `build_summary.json`
 
-This records the final settings actually used. It is useful when you generate a good sample and want to preserve the exact configuration.
+Records the final settings actually used. Useful when you generate a good sample and want to preserve the exact configuration.
 
 ---
 
-## 14. Manual QA checklist
+## 17. Manual QA checklist
 
 Before printing or binding, inspect at least:
 
-1. Half title page.
+1. Half title page (if enabled).
 2. Full title page.
 3. Source/copyright page.
-4. First TOC page.
-5. Last TOC page.
-6. First Arabic-numbered page of the main text.
-7. Several normal text pages with running heads.
-8. A later page from each major work or division.
+4. First TOC page and last TOC page.
+5. First Arabic-numbered page of the main text — confirm folio starts at 1.
+6. Several normal text pages with running heads.
+7. A later page from each major work or division.
+8. Each major work opener with subtitle/editorial description.
 9. Poetry pages, if present.
 10. Cast-list/dramatis-personae pages, if present.
 11. Pages with maps, diagrams, facsimiles, runes, inscriptions, or image-text.
@@ -674,11 +837,18 @@ Reject and rebuild if you see:
 - poetry justified as prose;
 - cast lists collapsed awkwardly into Act I or Scene I;
 - black/gray page artifacts;
-- missing authorial maps, diagrams, inscriptions, or image-texts.
+- missing authorial maps, diagrams, inscriptions, or image-texts;
+- orphan headings (heading at bottom of page with body text on next page).
+
+Tool-assisted checks:
+
+- Verify `qa_verdict.json` `first_body_folio_warnings` is empty — the first Arabic page should show folio 1.
+- Review `deepseek_text_qa.txt` or AI text QA output for structural/textual suggestions.
+- Review `deepseek_rule_suggestions.review.yaml` — manually approve patterns before loading.
 
 ---
 
-## 15. Recommended workflows by book type
+## 18. Recommended workflows by book type
 
 ### Large collected prose works
 
@@ -757,7 +927,7 @@ Use this carefully. It will remove maps, diagrams, facsimiles, and inscriptions 
 
 ---
 
-## 16. Troubleshooting
+## 19. Troubleshooting
 
 ### Problem: WeasyPrint installation fails
 
@@ -914,17 +1084,23 @@ Do not ignore strict failures for print-ready output.
 
 ---
 
-## 17. Cost-control advice for OpenAI mode
+## 20. Cost-control advice for AI mode
 
-Use OpenAI in stages.
+Use AI assistance in stages.
 
-Cheapest useful mode:
+### Cheapest useful mode (structure planning only):
+
+```powershell
+--use-openai --sample-pages 50
+```
+
+### Add visual QA (moderate cost):
 
 ```powershell
 --use-openai --openai-qa --sample-pages 50
 ```
 
-More expensive mode for image-heavy books:
+### Full mode for image-heavy books (higher cost):
 
 ```powershell
 --use-openai --openai-image-check --openai-qa
@@ -932,23 +1108,27 @@ More expensive mode for image-heavy books:
 
 Avoid `--openai-image-check` on huge illustrated EPUBs until you know you need it. It may classify many image/caption blocks.
 
-Control visual QA pages:
+### Control visual QA pages:
 
 ```powershell
 --openai-qa-pages 6
-```
-
-or:
-
-```powershell
 --openai-qa-pages 12
 ```
 
 Use fewer pages for cheap tests and more pages for serious final review.
 
+### Use DeepSeek for cheaper text QA:
+
+DeepSeek is generally less expensive than OpenAI for text-only tasks:
+
+```powershell
+$env:DEEPSEEK_API_KEY="sk-your-key-here"
+python deluxe_epub_to_pdf.py "book.epub" --config my_style.yaml --ai-provider deepseek --use-openai --out "sample.pdf" --sample-pages 50 --debug-html
+```
+
 ---
 
-## 18. Suggested production presets
+## 21. Suggested production presets
 
 ### Default deluxe A4
 
@@ -1009,7 +1189,7 @@ toc_entry_gap_mm: 2.1
 
 ---
 
-## 19. Practical full example
+## 22. Practical full example
 
 Generate config:
 
@@ -1028,7 +1208,7 @@ runner_rule_gap_mm: 3.5
 image_policy: "functional"
 ```
 
-Build a sample:
+Build a sample with OpenAI (or use `--ai-provider deepseek` for text QA):
 
 ```powershell
 python deluxe_epub_to_pdf.py "Complete Works of Jules Verne.epub" --config jules_verne_style.yaml --out "jules_verne_sample.pdf" --sample-pages 60 --use-openai --openai-qa --debug-html
@@ -1096,7 +1276,7 @@ When a sample looks good, preserve that config. The `build_summary.json` file re
 
 ---
 
-## 22. Minimal command cheat sheet
+## 23. Minimal command cheat sheet
 
 Generate config:
 

@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Deluxe EPUB-to-PDF Pipeline — Full Analysis Report</title>
+<style>
+  @page {
+    size: A4;
+    margin: 22mm 20mm 22mm 20mm;
+    @bottom-center {
+      content: counter(page);
+      font-family: Georgia, serif;
+      font-size: 9pt;
+      color: #555;
+    }
+  }
+  @page :first {
+    @bottom-center { content: normal; }
+  }
+  html {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: #1a1a1a;
+  }
+  body { margin: 0; }
+
+  .cover {
+    text-align: center;
+    padding-top: 80mm;
+    page-break-after: always;
+  }
+  .cover h1 {
+    font-size: 22pt;
+    font-weight: 400;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    margin-bottom: 8mm;
+  }
+  .cover .subtitle {
+    font-size: 12pt;
+    color: #555;
+    letter-spacing: .08em;
+  }
+  .cover .date {
+    margin-top: 20mm;
+    font-size: 10pt;
+    color: #888;
+  }
+  .cover .toc-line {
+    margin-top: 30mm;
+    font-size: 10pt;
+    color: #666;
+  }
+
+  .toc-page {
+    page-break-after: always;
+  }
+  .toc-page h2 {
+    text-align: center;
+    font-size: 16pt;
+    font-weight: 400;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 12mm;
+  }
+  .toc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .toc-list li {
+    margin-bottom: 2.5mm;
+  }
+  .toc-list li.toc-l1 { font-size: 11pt; text-transform: uppercase; letter-spacing: .03em; }
+  .toc-list li.toc-l2 { margin-left: 10mm; font-size: 10pt; }
+  .toc-list li.toc-l3 { margin-left: 18mm; font-size: 9.5pt; color: #555; }
+  .toc-list a { color: inherit; text-decoration: none; }
+  .toc-list a::after { content: leader('.') target-counter(attr(href), page); }
+
+  h1 { font-size: 16pt; font-weight: 400; letter-spacing: .04em; text-transform: uppercase; margin: 14mm 0 6mm; page-break-before: always; page-break-after: avoid; }
+  h1.chapter { page-break-before: always; }
+  h2 { font-size: 12.5pt; font-weight: 400; margin: 10mm 0 4mm; page-break-after: avoid; color: #2a2a2a; border-bottom: .4pt solid #ccc; padding-bottom: 1.5mm; }
+  h3 { font-size: 11pt; font-weight: 400; font-style: italic; margin: 8mm 0 3mm; page-break-after: avoid; color: #444; }
+  h4 { font-size: 10.5pt; font-weight: 400; margin: 5mm 0 2mm; page-break-after: avoid; color: #555; }
+
+  p { margin: 0 0 3mm; text-align: justify; }
+  p.lead { font-size: 11pt; font-style: italic; color: #444; }
+
+  pre { background: #f7f7f7; border: .4pt solid #ddd; padding: 3mm 4mm; font-family: "Consolas", "Courier New", monospace; font-size: 8.5pt; line-height: 1.4; white-space: pre-wrap; word-break: break-word; margin: 3mm 0; page-break-inside: avoid; }
+
+  code { font-family: "Consolas", "Courier New", monospace; font-size: 9pt; background: #f4f4f4; padding: .5pt 2pt; }
+
+  table { border-collapse: collapse; width: 100%; margin: 4mm 0; font-size: 9.5pt; page-break-inside: avoid; }
+  th { background: #eaeaea; text-align: left; padding: 2mm 3mm; font-weight: 600; border-bottom: .6pt solid #999; }
+  td { padding: 1.8mm 3mm; border-bottom: .3pt solid #ddd; vertical-align: top; }
+  tr:nth-child(even) td { background: #fafafa; }
+
+  ul, ol { margin: 3mm 0 3mm 8mm; padding: 0; }
+  li { margin-bottom: 1.5mm; }
+
+  .highlight-box {
+    background: #f9f9f0;
+    border-left: 3pt solid #c9a84c;
+    padding: 3mm 4mm;
+    margin: 4mm 0;
+    page-break-inside: avoid;
+  }
+  .highlight-box p { margin-bottom: 1mm; }
+
+  .stat-grid {
+    display: flex; flex-wrap: wrap; gap: 3mm;
+    margin: 4mm 0;
+  }
+  .stat-item {
+    flex: 0 0 calc(33.33% - 2mm);
+    background: #f5f5f5;
+    padding: 3mm;
+    text-align: center;
+    page-break-inside: avoid;
+  }
+  .stat-item .num { font-size: 16pt; font-weight: 600; color: #2a5d8f; }
+  .stat-item .label { font-size: 8.5pt; color: #777; text-transform: uppercase; letter-spacing: .04em; }
+
+  .badge { display: inline-block; padding: .4pt 6pt; font-size: 8pt; font-weight: 600; border-radius: 2pt; letter-spacing: .03em; }
+  .badge-green { background: #d4edda; color: #155724; }
+  .badge-yellow { background: #fff3cd; color: #856404; }
+  .badge-red { background: #f8d7da; color: #721c24; }
+
+  .flow-chart {
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 8pt;
+    line-height: 1.3;
+    background: #fafafa;
+    border: .4pt solid #ddd;
+    padding: 4mm;
+    margin: 4mm 0;
+    white-space: pre;
+    page-break-inside: avoid;
+  }
+
+  .footer-note { margin-top: 30mm; padding-top: 3mm; border-top: .4pt solid #ccc; font-size: 8.5pt; color: #888; }
+</style>
+</head>
+<body>
+
+<!-- ===== COVER ===== -->
+<section class="cover">
+  <h1>Deluxe EPUB-to-PDF<br>Pipeline Analysis</h1>
+  <div class="subtitle">Comprehensive Script Summary &amp; Enhancement Roadmap</div>
+  <div class="date">June 2026</div>
+  <div class="toc-line">Generated from deluxe_epub_to_pdf.py (~3,620 lines)</div>
+  <div style="margin-top:40mm; font-size:9pt; color:#999;">
+    Project: local_deluxe_epub_pipeline_configurable_with_guide
+  </div>
+</section>
+
+<!-- ===== TABLE OF CONTENTS ===== -->
+<section class="toc-page">
+  <h2>Contents</h2>
+  <ol class="toc-list">
+    <li class="toc-l1"><a href="#s1">1. Executive Overview</a></li>
+    <li class="toc-l2"><a href="#s1-1">1.1 Purpose &amp; Scope</a></li>
+    <li class="toc-l2"><a href="#s1-2">1.2 Key Statistics</a></li>
+    <li class="toc-l1"><a href="#s2">2. Detailed Architecture</a></li>
+    <li class="toc-l2"><a href="#s2-1">2.1 Pipeline Flow</a></li>
+    <li class="toc-l2"><a href="#s2-2">2.2 Regex Classification Engine</a></li>
+    <li class="toc-l2"><a href="#s2-3">2.3 Data Models</a></li>
+    <li class="toc-l2"><a href="#s2-4">2.4 EPUB Scanning &amp; Classification</a></li>
+    <li class="toc-l2"><a href="#s2-5">2.5 HTML Cleanup Pipeline</a></li>
+    <li class="toc-l2"><a href="#s2-6">2.6 CSS Generation Engine</a></li>
+    <li class="toc-l2"><a href="#s2-7">2.7 PDF Rendering &amp; Optimization</a></li>
+    <li class="toc-l2"><a href="#s2-8">2.8 QA Preflight System</a></li>
+    <li class="toc-l1"><a href="#s3">3. AI Integration</a></li>
+    <li class="toc-l2"><a href="#s3-1">3.1 Providers &amp; Models</a></li>
+    <li class="toc-l2"><a href="#s3-2">3.2 Structure Planning</a></li>
+    <li class="toc-l2"><a href="#s3-3">3.3 Image Classification</a></li>
+    <li class="toc-l2"><a href="#s3-4">3.4 Visual &amp; Text QA</a></li>
+    <li class="toc-l1"><a href="#s4">4. Configuration &amp; Auto-Fix System</a></li>
+    <li class="toc-l2"><a href="#s4-1">4.1 Three-Layer Override Precedence</a></li>
+    <li class="toc-l2"><a href="#s4-2">4.2 Rule Pack System</a></li>
+    <li class="toc-l2"><a href="#s4-3">4.3 Auto-Fix Engine</a></li>
+    <li class="toc-l1"><a href="#s5">5. Enhancement Roadmap</a></li>
+    <li class="toc-l2"><a href="#s5-1">5.1 Architectural Improvements</a></li>
+    <li class="toc-l2"><a href="#s5-2">5.2 Missing Typographic Features</a></li>
+    <li class="toc-l2"><a href="#s5-3">5.3 Print-Production Additions</a></li>
+    <li class="toc-l2"><a href="#s5-4">5.4 QA &amp; Safety Enhancements</a></li>
+    <li class="toc-l2"><a href="#s5-5">5.5 Workflow &amp; UX</a></li>
+    <li class="toc-l2"><a href="#s5-6">5.6 Output Diversification</a></li>
+    <li class="toc-l2"><a href="#s5-7">5.7 Non-Latin &amp; Accessibility</a></li>
+    <li class="toc-l1"><a href="#s6">6. Conclusion &amp; Priority Matrix</a></li>
+  </ol>
+</section>
+
+<!-- ===== SECTION 1: OVERVIEW ===== -->
+<h1 id="s1">1. Executive Overview</h1>
+
+<h2 id="s1-1">1.1 Purpose &amp; Scope</h2>
+
+<p class="lead"><code>deluxe_epub_to_pdf.py</code> is a local, single-script production pipeline that converts EPUB files into print-oriented A4 PDF interiors suitable for deluxe physical book editions. It targets large public-domain collected works (e.g., Delphi Classics, Project Gutenberg) and automates a strict professional book-production workflow.</p>
+
+<p>The pipeline enforces: A4 trim, single-page PDF output, recto/verso start discipline, roman/Arabic pagination, running heads with collection/work title alternation, poetry/drama/cast-list normalization, functional vs. decorative image classification, promotional content removal, TOC page-number resolution, and rigorous PDF preflight QA with auto-fix capabilities.</p>
+
+<h2 id="s1-2">1.2 Key Statistics</h2>
+
+<div class="stat-grid">
+  <div class="stat-item">
+    <div class="num">3,620</div>
+    <div class="label">Lines of Python</div>
+  </div>
+  <div class="stat-item">
+    <div class="num">13</div>
+    <div class="label">Compiled Regex Patterns</div>
+  </div>
+  <div class="stat-item">
+    <div class="num">5</div>
+    <div class="label">Dataclass Models</div>
+  </div>
+  <div class="stat-item">
+    <div class="num">90+</div>
+    <div class="label">Configurable Settings</div>
+  </div>
+  <div class="stat-item">
+    <div class="num">20+</div>
+    <div class="label">HTML Cleanup Functions</div>
+  </div>
+  <div class="stat-item">
+    <div class="num">9</div>
+    <div class="label">External Dependencies</div>
+  </div>
+</div>
+
+<table>
+  <tr><th>Dependency</th><th>Role</th></tr>
+  <tr><td>BeautifulSoup4 + lxml</td><td>HTML parsing, cleanup, normalization</td></tr>
+  <tr><td>EbookLib</td><td>EPUB reading, spine extraction, metadata</td></tr>
+  <tr><td>WeasyPrint</td><td>HTML+CSS → PDF rendering engine</td></tr>
+  <tr><td>PyMuPDF (fitz)</td><td>PDF analysis, vector drawing, text extraction, page renders</td></tr>
+  <tr><td>pikepdf</td><td>PDF optimization, compression, linearization</td></tr>
+  <tr><td>openai</td><td>OpenAI/DeepSeek API for AI-assisted decisions</td></tr>
+  <tr><td>PyYAML</td><td>Config and rule-pack file parsing</td></tr>
+  <tr><td>Pillow</td><td>PNG render analysis, dark-page detection</td></tr>
+</table>
+
+<!-- ===== SECTION 2: ARCHITECTURE ===== -->
+<h1 id="s2">2. Detailed Architecture</h1>
+
+<h2 id="s2-1">2.1 Pipeline Flow</h2>
+
+<div class="flow-chart">
+                      ┌──────────┐
+                      │   EPUB    │
+                      │ (ebooklib)│
+                      └────┬─────┘
+                           │
+                           ▼
+                  ┌────────────────┐
+                  │  SCAN &amp;        │
+                  │  CLASSIFY       │
+                  │  spine items    │
+                  └───────┬────────┘
+                          │
+              ┌───────────┼───────────┐
+              │           │           │
+         [Heuristic]  [Rule     [AI Structure
+          Classifier]  Packs]    Planning]
+              │           │           │
+              └───────────┼───────────┘
+                          │
+                          ▼
+                  ┌────────────────┐
+                  │  CLEAN &amp;       │
+                  │  NORMALIZE      │
+                  │  (20+ functions)│
+                  └───────┬────────┘
+                          │
+                          ▼
+                  ┌────────────────┐
+                  │  COMPOSE        │
+                  │  HTML + CSS     │
+                  │  + Build TOC    │
+                  └───────┬────────┘
+                          │
+                          ▼
+                  ┌────────────────┐
+                  │  RENDER PDF     │
+                  │  (WeasyPrint)   │
+                  └───────┬────────┘
+                          │
+              ┌───────────┼───────────┐
+              │           │           │
+         [Resolve TOC  [Draw Vector  [Optimize
+          Page Numbers] Runner Rules] with pikepdf]
+              │           │           │
+              └───────────┼───────────┘
+                          │
+                          ▼
+                  ┌────────────────┐
+                  │  QA PREFLIGHT   │
+                  │  (15+ checks)   │
+                  └───────┬────────┘
+                          │
+              ┌───────────┼───────────┐
+              │           │           │
+         [Auto-Fix    [AI Text QA]  [AI Visual QA]
+          Settings]    (DeepSeek)    (OpenAI)]
+              │           │           │
+              └───────────┼───────────┘
+                          │
+                          ▼
+                  ┌────────────────┐
+                  │  QA REPORT +    │
+                  │  VERDICT JSON + │
+                  │  PAGE RENDERS   │
+                  └────────────────┘
+</div>
+
+<h2 id="s2-2">2.2 Regex Classification Engine</h2>
+
+<p>The script defines <strong>13 compiled regular expressions</strong> as module-level constants, each serving a specific classification purpose:</p>
+
+<table>
+  <tr><th>Pattern</th><th>Purpose</th><th>Examples</th></tr>
+  <tr><td><code>PROMO_PATTERNS</code></td><td>Detect promotional/catalogue content</td><td>"Delphi Classics", "Also available", "Subscribe", "ISBN", "www.", "Goodreads"</td></tr>
+  <tr><td><code>BACKMATTER_PATTERNS</code></td><td>Identify back-of-book sections</td><td>"Notes", "Appendix", "Bibliography", "Glossary", "Index", "Chronology"</td></tr>
+  <tr><td><code>LOCAL_TOC_HEADINGS</code></td><td>Find inline mini-tables-of-contents</td><td>"Contents", "Table of Contents", "Chapter List"</td></tr>
+  <tr><td><code>COLLECTION_DIVISIONS</code></td><td>Detect collected-works divisions</td><td>"The Novels", "Short Stories", "Plays", "Poetry", "Essays"</td></tr>
+  <tr><td><code>MAJOR_WORK_HINTS</code></td><td>Identify major work boundaries</td><td>"Book I", "Part II", "Novel", "Play", "Poem"</td></tr>
+  <tr><td><code>CHAPTER_HEADINGS</code></td><td>Match chapter/section labels</td><td>"CHAPTER", "PART", "SCENE", "ACT", "Canto", Roman numerals</td></tr>
+  <tr><td><code>CAST_HEADINGS</code></td><td>Detect dramatis personae sections</td><td>"Dramatis Personae", "Characters", "Persons of the Play"</td></tr>
+  <tr><td><code>ACT_SCENE_HEADINGS</code></td><td>Identify act/scene transitions</td><td>"ACT I", "SCENE II"</td></tr>
+  <tr><td><code>PLATE_CAPTION_PATTERNS</code></td><td>Spot publisher-added plate captions</td><td>"Portrait of the Author", "Birthplace", "First Edition title page"</td></tr>
+  <tr><td><code>FUNCTIONAL_IMAGE_CLUES</code></td><td>Detect authorial/functional images</td><td>"Map", "Diagram", "Chart", "Rune", "Inscription", "Facsimile"</td></tr>
+  <tr><td><code>FUNCTIONAL_IMAGE_SRC_CLUES</code></td><td>Same as above for src attributes</td><td>Image filename contains "map", "diagram", "chart"</td></tr>
+  <tr><td><code>PUBLISHER_IMAGE_SRC_CLUES</code></td><td>Identify publisher/decorative images</td><td>"Cover", "Frontispiece", "Portrait", "Photo", "Logo", "Catalogue"</td></tr>
+  <tr><td><code>POETRY_CLASS_RE</code></td><td>Detect poetry-marked CSS classes</td><td>"poem", "poetry", "stanza", "verse", "canto", "song", "ode"</td></tr>
+</table>
+
+<p>These patterns can be <strong>extended at runtime</strong> via YAML rule packs in the <code>rules/</code> directory. The <code>apply_rule_packs()</code> function merges external patterns into the built-in regexes using alternation. AI-generated suggestions are written as <code>.review.yaml</code> files for human approval.</p>
+
+<h2 id="s2-3">2.3 Data Models</h2>
+
+<p>Five <code>@dataclass</code> classes organize all pipeline state:</p>
+
+<h3>Settings (~90 fields)</h3>
+<p>The complete typographic configuration — trim size, body font metrics, margin geometry, running head layout (6 variants), folio sizing, paragraph indent, blockquote margins, heading hierarchy (8 heading levels each with independent sizes and margins), TOC styling (4 levels), poetry verse block sizing, cast list layout, image policy (functional / keep-all / remove-all), front matter generation flags, rule pack paths, and pipeline behavior flags.</p>
+
+<h3>SpineDoc</h3>
+<p>Represents one EPUB spine item: index, item_id, name, href, raw bytes, extracted headings (up to 40), text sample (first 9,000 chars), text length, classification kind (one of 10 types), remove flag, major_title, current_division, poetry/drama/image boolean flags, and an AI confidence score.</p>
+
+<h3>TocEntry</h3>
+<p>Table of contents entry: hierarchical level (1–4), display title, target HTML anchor ID, and semantic kind (division / work / backmatter).</p>
+
+<h3>BuildLog</h3>
+<p>Complete audit trail: removed blocks, removed documents, kept/removed images, warnings, hard failures, AI decisions, title source, and counts for poetry blocks detected, cast sections detected, typographic fixes applied, and CSS auto-fix changes.</p>
+
+<h3>QAVerdict</h3>
+<p>Comprehensive quality-assurance state: page count, non-A4 pages, line spills, dark pages, blank page artifacts, header collisions, narrow columns, TOC warnings (page-number + duplicate), empty content pages, duplicate title pages, opener page warnings, work-description style warnings, first body folio warnings, OpenAI visual flags, text QA flags, AI rule suggestion file path, fonts seen, images seen, QA render paths. The <code>has_blockers</code> property aggregates all blocking conditions for <code>--strict</code> mode.</p>
+
+<h2 id="s2-4">2.4 EPUB Scanning &amp; Classification</h2>
+
+<p>The scanning phase reads EPUB spine items via EbookLib, then classifies each document through a two-tier system:</p>
+
+<h3>Tier 1: Heuristic Classification</h3>
+<p><code>heuristic_classify_doc()</code> assigns each document a <code>kind</code> using the regex patterns. The priority chain:</p>
+<ol>
+  <li><strong>Promo detection</strong> — Gutenberg license text or short documents matching PROMO_PATTERNS</li>
+  <li><strong>Local TOC detection</strong> — "Contents" headings with low word count</li>
+  <li><strong>Backmatter</strong> — matching BACKMATTER_PATTERNS</li>
+  <li><strong>Collection divisions</strong> — matching COLLECTION_DIVISIONS</li>
+  <li><strong>Cast/drama</strong> — matching CAST_HEADINGS or flagged as containing drama</li>
+  <li><strong>Poetry</strong> — flagged by probe as poetry-containing</li>
+  <li><strong>Major works</strong> — H1 headings that aren't chapter-like, less than 100 chars</li>
+  <li><strong>Frontmatter</strong> — preface/introduction/foreword near the start</li>
+  <li><strong>Fallback: chapter</strong> — everything else</li>
+</ol>
+
+<h3>Tier 2: AI-Assisted Classification (optional)</h3>
+<p><code>apply_openai_book_plan()</code> sends spine documents to OpenAI or DeepSeek in batches of 24, each with headings, text samples (3,500 chars), text length, and local heuristic flags. The AI returns structured JSON with kind, remove_document, major_title, current_division, and confidence scores. AI decisions only override when confidence ≥ 0.86 for removals.</p>
+
+<h2 id="s2-5">2.5 HTML Cleanup Pipeline</h2>
+
+<p>Each non-removed document passes through ~20 sequential normalization functions inside <code>clean_document()</code>:</p>
+
+<table>
+  <tr><th>#</th><th>Function</th><th>What It Does</th></tr>
+  <tr><td>1</td><td><code>remove_comments_scripts_styles</code></td><td>Strips HTML comments, &lt;script&gt;, &lt;style&gt;, &lt;iframe&gt;, &lt;object&gt;, &lt;embed&gt;</td></tr>
+  <tr><td>2</td><td><code>strip_bad_attributes</code></td><td>Removes all attributes except href, src, alt, title, id, class, colspan, rowspan</td></tr>
+  <tr><td>3</td><td><code>remove_local_mini_tocs</code></td><td>Detects "Contents" headings followed by link-heavy nav blocks; strips them</td></tr>
+  <tr><td>4</td><td><code>remove_compact_local_contents_blocks</code></td><td>Catches link-dense nav blocks without explicit headings</td></tr>
+  <tr><td>5</td><td><code>remove_promotional_blocks</code></td><td>Strips &lt;section&gt;/&lt;div&gt;/&lt;p&gt; matching promo patterns with structural clues</td></tr>
+  <tr><td>6</td><td><code>rewrite_images</code></td><td>For each &lt;img&gt;, classifies keep/remove; preserves functional images, removes plates</td></tr>
+  <tr><td>7</td><td><code>remove_empty_layout_shells</code></td><td>Strips empty &lt;figure&gt;/&lt;div&gt;/&lt;section&gt;</td></tr>
+  <tr><td>8</td><td><code>unwrap_useless_inline_tags</code></td><td>Unwraps empty &lt;span&gt;/&lt;font&gt; tags</td></tr>
+  <tr><td>9</td><td><code>simple_typographic_cleanup</code></td><td>Converts double-dashes to em-dashes, triple-dots to ellipsis, removes double spaces</td></tr>
+  <tr><td>10</td><td><code>normalize_notes_refs</code></td><td>Converts footnote reference links into &lt;sup class="note-ref"&gt;</td></tr>
+  <tr><td>11</td><td><code>normalize_poetry</code></td><td>Converts &lt;br&gt;-lineated blocks to structured verse blocks; groups short-paragraph runs</td></tr>
+  <tr><td>12</td><td><code>normalize_cast_and_drama</code></td><td>Marks cast headings, wraps cast lists, detects stage directions and act/scene transitions</td></tr>
+  <tr><td>13</td><td><code>promote_paragraph_headings</code></td><td>Detects disguised headings in &lt;p&gt;/&lt;div&gt; and promotes them to &lt;h2&gt;</td></tr>
+  <tr><td>14</td><td><code>add_synthetic_opener_if_needed</code></td><td>Inserts synthetic &lt;h1&gt; when AI-assigned major_title doesn't appear in the document</td></tr>
+  <tr><td>15</td><td><code>normalize_headings</code></td><td>Core heading classifier — determines heading semantic role, builds TOC entries</td></tr>
+  <tr><td>16</td><td><code>mark_major_work_descriptions</code></td><td>Detects editorial blurbs after work titles; styles as smaller italic apparatus</td></tr>
+  <tr><td>17</td><td><code>insert_major_opener_separators</code></td><td>Inserts true-blank divs before/after major opener pages</td></tr>
+  <tr><td>18</td><td><code>remove_duplicate_current_work_title_line</code></td><td>Removes repeated work title lines in continuation documents</td></tr>
+  <tr><td>19</td><td><code>mark_standalone_work_description_fragment</code></td><td>Catches editorial blurbs split into separate EPUB spine files</td></tr>
+  <tr><td>20</td><td><code>fragment_is_title_only</code></td><td>Skips fragments that contain only title text with no body content</td></tr>
+</table>
+
+<h2 id="s2-6">2.6 CSS Generation Engine</h2>
+
+<p><code>css_text()</code> generates the complete print stylesheet (~400 lines of CSS) driven entirely by the Settings dataclass. Key features:</p>
+
+<ul>
+  <li><strong>@page rules:</strong> title, front (roman folios), body (Arabic folios), opener (no folios), nofolio (blank pages), :blank (true blank pages)</li>
+  <li><strong>Running head layouts:</strong> Six variants — <code>right_title_full_rule</code> (collection title verso, current work recto + full-width vector rule), <code>centered_single_rule</code>, <code>dual_full_rule</code>, <code>alternating</code>, plus two split-rule varieties</li>
+  <li><strong>TOC rendering:</strong> Two-pass system — first pass uses CSS <code>target-counter(attr(href), page)</code> with leader dots; second pass uses explicit resolved page numbers with CSS Grid layout for precise alignment</li>
+  <li><strong>Hard normalization:</strong> Aggressive <code>!important</code> overrides against ebook CSS (<code>max-width: none</code>, <code>width: auto</code>) on all body elements</li>
+  <li><strong>Verse styling:</strong> Max-width constraint, hanging indents via negative <code>text-indent</code> + <code>padding-left</code>, ragged-right alignment, <code>pre-wrap</code> white-space</li>
+  <li><strong>Cast list styling:</strong> Constrained max-width, left-aligned</li>
+  <li><strong>Work description styling:</strong> Italic, smaller font (body_size_pt − 1pt), no indent, bottom margin</li>
+  <li><strong>Heading hierarchy:</strong> 8 distinct heading levels (major-work, collection-division, backmatter-opener, subdivision, part-heading, chapter-section-heading, h3, minor-heading) each with independent font size, margins, and letter-spacing</li>
+</ul>
+
+<h2 id="s2-7">2.7 PDF Rendering &amp; Optimization</h2>
+
+<p>The rendering pipeline operates in distinct phases:</p>
+
+<ol>
+  <li><strong>write_build():</strong> Writes <code>book.html</code> and <code>style.css</code> to the build directory</li>
+  <li><strong>render_pdf():</strong> Calls WeasyPrint's <code>HTML.write_pdf()</code> with the CSS stylesheet</li>
+  <li><strong>resolve_toc_page_numbers():</strong> Opens the rendered PDF with PyMuPDF, extracts internal link destinations from TOC pages, maps target IDs to physical page numbers</li>
+  <li><strong>Second render pass:</strong> If TOC page numbers were resolved, re-renders HTML with explicit page numbers in a CSS Grid layout</li>
+  <li><strong>subset_pdf():</strong> For sample mode, extracts first N pages using PyMuPDF</li>
+  <li><strong>draw_vector_runner_rules():</strong> Post-render vector drawing — uses PyMuPDF's Shape API to draw clean stroke-only horizontal lines at the configured <code>runner_rule_y_mm</code> position, only on pages that have running-head text</li>
+  <li><strong>optimize_pdf():</strong> pikepdf compression, object stream generation, and linearization for web-fast viewing</li>
+</ol>
+
+<h2 id="s2-8">2.8 QA Preflight System</h2>
+
+<p><code>preflight_pdf()</code> performs <strong>15+ checks</strong> on the rendered PDF:</p>
+
+<table>
+  <tr><th>Check</th><th>Method</th><th>Severity</th></tr>
+  <tr><td>A4 page-size verification</td><td>Every page rect measured; flags if width/height deviates &gt;2pt from A4</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>Font inventory</td><td>PyMuPDF <code>get_page_fonts()</code> across all pages</td><td><span class="badge badge-green">INFO</span></td></tr>
+  <tr><td>Image count</td><td>PyMuPDF <code>get_page_images()</code></td><td><span class="badge badge-green">INFO</span></td></tr>
+  <tr><td>Line-spill detection</td><td>Identifies single-letter or Roman-numeral-only lines that look like broken word spills</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>Header clearance</td><td>Measures Y position of first body text vs configured <code>runner_rule_y + runner_body_clearance</code></td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>Narrow column detection</td><td>Median text block width &lt; 300pt flagged (A4 body should be ~450pt)</td><td><span class="badge badge-yellow">WARN</span></td></tr>
+  <tr><td>Blank-page artifacts</td><td>Pages with drawings/images but no text</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>Empty content pages</td><td>After page 4, pages containing only title/folio-like text</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>Duplicate title pages</td><td>Multiple opening pages matching the book title</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>Opener page warnings</td><td>Display titles carrying folios; missing blank separators</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>TOC duplicate explosion</td><td>Entries repeated ≥4 times in rendered TOC</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>TOC page number uniformity</td><td>All entries resolving to the same page number</td><td><span class="badge badge-yellow">WARN</span></td></tr>
+  <tr><td>First body folio check</td><td>Page after TOC should show Arabic folio 1</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>Dark-page detection</td><td>Rendered PNG pages with average brightness &lt; 45 (via Pillow)</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+  <tr><td>Work description style</td><td>Editorial blurbs must be italic and at the correct smaller font size</td><td><span class="badge badge-red">BLOCKER</span></td></tr>
+</table>
+
+<!-- ===== SECTION 3: AI ===== -->
+<h1 id="s3">3. AI Integration</h1>
+
+<h2 id="s3-1">3.1 Providers &amp; Models</h2>
+
+<p>The pipeline supports two AI providers via the <code>--ai-provider</code> flag:</p>
+
+<ul>
+  <li><strong>OpenAI</strong> — default provider. Uses <code>responses.create()</code> with structured JSON schema for book structure planning and visual QA. Default model: <code>gpt-5.4-mini</code>.</li>
+  <li><strong>DeepSeek</strong> — uses <code>chat.completions.create()</code> with JSON mode. Default model: <code>deepseek-chat</code>. Runs text QA after local deterministic QA completes.</li>
+  <li><strong>none</strong> — disables all AI features; purely deterministic pipeline.</li>
+</ul>
+
+<h2 id="s3-2">3.2 Structure Planning</h2>
+
+<p><code>apply_openai_book_plan()</code> sends spine documents in batches of 24. Each batch includes: document index, href, first 20 extracted headings, text sample (3,500 characters), text length, and local heuristic flags (contains_poetry, contains_drama, contains_images).</p>
+
+<p>The AI returns structured JSON classifying each document as one of: frontmatter, division, major_work, chapter, poetry, play, backmatter, promo, local_toc, or unknown. It also returns a remove_document flag (only applied at ≥86% confidence) and a major_title string for work-level heading assignment.</p>
+
+<h2 id="s3-3">3.3 Image Classification</h2>
+
+<p><code>ai_image_decision()</code> sends image src + surrounding context (3,000 characters of caption and nearby text) to the AI for classification as authorial/functional vs. publisher-added plate. The decision is only applied at ≥70% confidence. The <code>should_keep_image()</code> function implements a multi-tier decision:</p>
+
+<ol>
+  <li>If <code>image_policy</code> is "keep-all" → keep</li>
+  <li>If <code>image_policy</code> is "remove-all" → remove</li>
+  <li>If plate context is detected without functional context → remove</li>
+  <li>If AI is available, consult it with confidence threshold</li>
+  <li>If functional context is detected → keep</li>
+  <li>If "cover" or "title" in src with short context → remove</li>
+</ol>
+
+<h2 id="s3-4">3.4 Visual &amp; Text QA</h2>
+
+<h3>Visual QA (OpenAI vision)</h3>
+<p>Renders up to <code>--openai-qa-pages</code> (default 10) pages as JPEG images, base64-encodes them, and sends them to the vision model with a 9-category inspection prompt: body justification, paragraph rhythm, chapter/title placement, running heads/rules, folios, TOC, image cleanup, poetry/drama, and ebook artifacts. Returns PASS/FAIL with page-specific findings.</p>
+
+<h3>Text QA (DeepSeek or OpenAI)</h3>
+<p>Sends extracted PDF text (first 28 pages, 60,000 characters) + local QA reports + settings excerpt to the text model for structural review. The model can generate regex rule suggestions stored as <code>.review.yaml</code> files using only the 13 known rule-pack keys. These files must be manually reviewed before loading.</p>
+
+<!-- ===== SECTION 4: CONFIG ===== -->
+<h1 id="s4">4. Configuration &amp; Auto-Fix</h1>
+
+<h2 id="s4-1">4.1 Three-Layer Override Precedence</h2>
+
+<p>Settings resolve in this exact order:</p>
+
+<ol>
+  <li><strong>Built-in defaults</strong> — hardcoded in the <code>Settings</code> dataclass</li>
+  <li><strong>Config file</strong> — YAML or JSON via <code>--config</code>; unknown keys are warned and ignored</li>
+  <li><strong>CLI flags</strong> — ~25 explicit command-line overrides (e.g., <code>--body-size</code>, <code>--line-height</code>, <code>--margin-side</code>)</li>
+</ol>
+
+<p><code>write_default_config</code> generates a complete editable YAML config with all defaults and a comment header explaining the override order.</p>
+
+<h2 id="s4-2">4.2 Rule Pack System</h2>
+
+<p>External YAML files in the <code>rules/</code> directory can extend any of the 13 built-in regex patterns. The bundled <code>generic_epub.yaml</code> adds:</p>
+
+<ul>
+  <li>5 promo patterns ("free sample", "about delphi classics", etc.)</li>
+  <li>4 plate caption patterns ("cover image", "title card", "decorative plate", "photogravure")</li>
+  <li>3 functional image clues ("genealogical table", "family tree", "ground plan")</li>
+  <li>3 publisher image source clues ("frontmatter", "titlepage", "halftitle")</li>
+</ul>
+
+<p>Each pattern is validated as a valid regex before merging. AI-generated suggestions are written as <code>{provider}_rule_suggestions.review.yaml</code> files.</p>
+
+<h2 id="s4-3">4.3 Auto-Fix Engine</h2>
+
+<p><code>auto_fix_settings()</code> reads QA verdict flags and applies safe CSS/config adjustments in up to <code>--max-auto-fix-passes</code> iterations (default 1):</p>
+
+<table>
+  <tr><th>Trigger</th><th>Auto-Fix Applied</th></tr>
+  <tr><td>Header/rule collisions</td><td><code>runner_body_clearance_mm</code> increased by +2mm (max 14mm)</td></tr>
+  <tr><td>Body typography warnings</td><td><code>justify_prose</code> enabled, <code>hyphenate</code> enabled, <code>line_height</code> increased by +0.025 (max 1.32)</td></tr>
+  <tr><td>Title placement issues</td><td><code>subdivision_margin_bottom_mm</code> increased by +1.2mm, <code>major_opener_bottom_margin_mm</code> increased by +2mm</td></tr>
+  <tr><td>TOC issues</td><td><code>toc_line_height</code> increased by +0.02, <code>toc_entry_gap_mm</code> increased by +0.4mm</td></tr>
+  <tr><td>Folio/numbering issues</td><td>Logged for human review; no safe generic auto-fix exists</td></tr>
+  <tr><td>Image/caption issues</td><td>Logged for human review; no safe generic auto-fix exists</td></tr>
+  <tr><td>Poetry/drama issues</td><td>Logged for human review; no safe generic auto-fix exists</td></tr>
+  <tr><td>Blank/artifact issues</td><td>Logged for human review; no safe generic auto-fix exists</td></tr>
+</table>
+
+<p>After each fix pass, the PDF is fully re-rendered and QA runs again. All CSS auto-fix notes are written to <code>build_summary.json</code>.</p>
+
+<!-- ===== SECTION 5: ENHANCEMENTS ===== -->
+<h1 id="s5">5. Enhancement Roadmap</h1>
+
+<h2 id="s5-1">5.1 Architectural Improvements</h2>
+
+<table>
+  <tr><th>Addition</th><th>Rationale</th></tr>
+  <tr>
+    <td><strong>Modular package split</strong></td>
+    <td>Split 3,620-line monolith into <code>pipeline/</code> with ~10 modules (~300–500 lines each). Preserves single-command experience via <code>__main__.py</code> while gaining testability, maintainability, and contributor accessibility.</td>
+  </tr>
+  <tr>
+    <td><strong>Pipeline as DAG</strong></td>
+    <td>Model each transformation as a directed acyclic graph node. Enables: (a) caching intermediate results, (b) parallel document processing, (c) selective re-execution when only one stage changes.</td>
+  </tr>
+  <tr>
+    <td><strong>Caching layer</strong></td>
+    <td>Save cleaned HTML per document keyed by content hash. When tweaking <code>--line-height</code> or margins, the entire scan/classify/clean phase is skipped — only CSS + render reruns. Saves minutes per iteration on large collected works.</td>
+  </tr>
+  <tr>
+    <td><strong>Plugin system</strong></td>
+    <td>Beyond regex rule packs: register custom Python cleaners, classifiers, and post-processors via a plugin hook system without modifying core code.</td>
+  </tr>
+</table>
+
+<h2 id="s5-2">5.2 Missing Typographic Features</h2>
+
+<table>
+  <tr><th>Feature</th><th>How It Fits the "Deluxe" Vision</th></tr>
+  <tr>
+    <td><strong>Drop caps / initial caps</strong></td>
+    <td>Detect first paragraph after chapter headings; wrap first letter in <code>&lt;span class="drop-cap"&gt;</code> with CSS <code>initial-letter: 3</code>. A defining feature of deluxe print editions.</td>
+  </tr>
+  <tr>
+    <td><strong>Small caps normalization</strong></td>
+    <td>Distinguish ALL-CAPS acronyms from semantic small caps (AM/PM, BC/AD, abbreviations). Convert to <code>font-variant: small-caps</code>. Critical for scholarly typography.</td>
+  </tr>
+  <tr>
+    <td><strong>Ligature control</strong></td>
+    <td>Add configurable <code>font-variant-ligatures</code> with per-element overrides. EB Garamond has rich ligature sets that professional typography controls deliberately.</td>
+  </tr>
+  <tr>
+    <td><strong>True footnote placement</strong></td>
+    <td>Collect footnote bodies, place at page bottom with rule separator using WeasyPrint <code>float: footnote</code>. Currently footnote bodies are lost or become inline text.</td>
+  </tr>
+  <tr>
+    <td><strong>Post-render widow/orphan check</strong></td>
+    <td>CSS <code>widows:2; orphans:2</code> is advisory — real rendering often produces widows anyway. A post-render analysis catches and flags actual widow/orphan occurrences by page.</td>
+  </tr>
+  <tr>
+    <td><strong>River detection</strong></td>
+    <td>Image-processing on rendered PNG pages: detect vertical white-space gaps in justified text via connected-component analysis. Rivers are a hallmark of poor justification and are explicitly mentioned in the production prompt.</td>
+  </tr>
+  <tr>
+    <td><strong>Page balance check</strong></td>
+    <td>Detect chapters where the last page carries fewer than 4–5 lines. Professional typesetters avoid "widow pages" with only 1–2 lines.</td>
+  </tr>
+  <tr>
+    <td><strong>Table intelligence</strong></td>
+    <td>Detect wide tables, optionally rotate to landscape on their own page. Auto-fit column widths. Handle multi-page tables with repeated headers. Essential for genealogical tables and chronologies.</td>
+  </tr>
+  <tr>
+    <td><strong>Margin notes / sidenotes</strong></td>
+    <td>Detect note-like short paragraphs and convert to CSS <code>@left-middle</code> or float-based sidenotes. Common in annotated classics.</td>
+  </tr>
+  <tr>
+    <td><strong>Multi-column layouts</strong></td>
+    <td>Support 2-column mode for indices, bibliographies, and chronologies. Configurable per-document-kind.</td>
+  </tr>
+</table>
+
+<h2 id="s5-3">5.3 Print-Production Additions</h2>
+
+<table>
+  <tr><th>Feature</th><th>Description</th></tr>
+  <tr><td><strong>Crop marks + bleed</strong></td><td>For offset printing: 3mm bleed with trim marks. Add <code>--bleed-mm</code> and <code>--crop-marks</code>. WeasyPrint can render larger pages with the live area centered; trim marks as CSS borders or vector paths.</td></tr>
+  <tr><td><strong>ICC color profile embedding</strong></td><td>For CMYK prepress: embed FOGRA39 or similar ICC profile into PDF. pikepdf can inject OutputIntent. Add <code>--color-profile</code> flag.</td></tr>
+  <tr><td><strong>Spine width calculator</strong></td><td>Given page count + paper GSM, calculate spine width in mm. Output to <code>build_summary.json</code> to feed directly into cover design workflow.</td></tr>
+  <tr><td><strong>Signature imposition hints</strong></td><td>Output page count organized into printer signatures (typically 16 or 32 pages). Include in build summary for binding layout.</td></tr>
+  <tr><td><strong>PDF/X compliance</strong></td><td>Optionally output PDF/X-1a or PDF/X-4 for guaranteed prepress compatibility. pikepdf can validate and add required metadata.</td></tr>
+</table>
+
+<h2 id="s5-4">5.4 QA &amp; Safety Enhancements</h2>
+
+<table>
+  <tr><th>Feature</th><th>How It Works</th></tr>
+  <tr><td><strong>Interactive QA accept/reject</strong></td><td><code>--interactive-qa</code> mode: display each QA warning, let user press <code>a</code> (accept/suppress), <code>f</code> (flag for fix), <code>i</code> (ignore). Stores decisions in a state file for future runs.</td></tr>
+  <tr><td><strong>Diff-against-reference</strong></td><td><code>--diff-against golden/</code> compares QA reports and flags only <em>new</em> issues. Essential for iterative refinement of a known-good build.</td></tr>
+  <tr><td><strong>Visual diff renders</strong></td><td>Side-by-side rendered PNGs of the same pages from two builds, with pixel-diff overlay highlighting changed areas in red.</td></tr>
+  <tr><td><strong>Regression test corpus</strong></td><td>A <code>tests/</code> directory with small curated EPUBs exercising specific features. CI/CD runs <code>--strict</code> on all and checks exit codes.</td></tr>
+  <tr><td><strong>Rule pack validator</strong></td><td>Before using a new rule pack, run it against a corpus: "This pattern would remove X paragraphs from Y documents, including sample text Z." Prevents accidentally deleting real literature.</td></tr>
+</table>
+
+<h2 id="s5-5">5.5 Workflow &amp; UX</h2>
+
+<table>
+  <tr><th>Feature</th><th>Description</th></tr>
+  <tr><td><strong>Incremental/resume builds</strong></td><td>If a build crashes after processing 200/500 documents, save progress and resume. Valuable for huge collected works (10+ minute processing).</td></tr>
+  <tr><td><strong>Batch processing</strong></td><td><code>--batch "books/*.epub" --config shared.yaml</code> processes multiple EPUBs sequentially with shared settings.</td></tr>
+  <tr><td><strong>Watch mode</strong></td><td><code>--watch</code> monitors EPUB and config. On change, auto-rebuilds the sample and opens the PDF. Tight feedback loop during style tuning.</td></tr>
+  <tr><td><strong>Progress reporting</strong></td><td>Rich progress bars (tqdm): scanning spine, cleaning documents, rendering PDF, running QA — with estimated time remaining.</td></tr>
+  <tr><td><strong>Config validation</strong></td><td>Validate Settings before building: positive margins, font size in valid range, font files exist, runner rule Y position compatible with clearance. Catch misconfigurations early.</td></tr>
+  <tr><td><strong>Template-based CSS</strong></td><td>Replace string-concatenation <code>css_text()</code> with Jinja2 templates. Separates layout logic from Python code; makes custom CSS variants trivial.</td></tr>
+</table>
+
+<h2 id="s5-6">5.6 Output Diversification</h2>
+
+<table>
+  <tr><th>Format</th><th>Use Case</th></tr>
+  <tr><td><strong>Cleaned EPUB output</strong></td><td>After cleanup, also produce a cleaned EPUB. Same pipeline, dual output. Useful for e-reader distribution alongside the print PDF.</td></tr>
+  <tr><td><strong>Static HTML website</strong></td><td>Generate a static HTML version with navigation. Single-source multi-format publishing from one pipeline.</td></tr>
+  <tr><td><strong>PDF variants</strong></td><td><code>--profile digital</code> (RGB, optimized), <code>--profile print</code> (CMYK, bleed, crop), <code>--profile proof</code> (watermarked, low-res "PROOF" overlay).</td></tr>
+</table>
+
+<h2 id="s5-7">5.7 Non-Latin &amp; Accessibility</h2>
+
+<table>
+  <tr><th>Feature</th><th>Description</th></tr>
+  <tr><td><strong>Non-Latin script support</strong></td><td>All regex patterns assume Latin script. Add CJK, Cyrillic, Arabic, Devanagari detection modes. Poetry detection uses Latin-specific heuristics that fail for CJK.</td></tr>
+  <tr><td><strong>RTL language support</strong></td><td>Right-to-left page progression, RTL running heads, RTL TOC. WeasyPrint supports <code>direction: rtl</code> — just needs a pipeline flag.</td></tr>
+  <tr><td><strong>PDF/UA accessibility tagging</strong></td><td>Add document structure tags for screen-reader-compatible PDFs. pikepdf can inject structure trees.</td></tr>
+  <tr><td><strong>Metadata passthrough</strong></td><td>Currently only title is extracted. Also pull: author, publisher, date, language, ISBN. Embed in PDF metadata and optionally on a colophon page.</td></tr>
+</table>
+
+<!-- ===== SECTION 6: CONCLUSION ===== -->
+<h1 id="s6">6. Conclusion &amp; Priority Matrix</h1>
+
+<p>The <code>deluxe_epub_to_pdf.py</code> pipeline is already a remarkably capable and well-engineered tool. It handles the hardest problems in EPUB-to-print conversion — structural classification of malformed public-domain EPUBs, promotional content removal, image triage, poetry/drama normalization, and rigorous QA — with a level of thoroughness that surpasses most commercial and open-source alternatives.</p>
+
+<p>The following matrix organizes the proposed enhancements by impact and effort:</p>
+
+<table>
+  <tr><th>Priority</th><th>Enhancement</th><th>Impact</th><th>Effort</th></tr>
+  <tr><td><span class="badge badge-red">HIGH</span></td><td>Modular package split</td><td>Foundational — enables all other work</td><td>Medium</td></tr>
+  <tr><td><span class="badge badge-red">HIGH</span></td><td>Caching layer</td><td>Massive iteration speed improvement</td><td>Medium</td></tr>
+  <tr><td><span class="badge badge-red">HIGH</span></td><td>Config validation</td><td>Prevents silent misconfigurations</td><td>Low</td></tr>
+  <tr><td><span class="badge badge-red">HIGH</span></td><td>Drop caps + small caps</td><td>Defining "deluxe" typographic feature</td><td>Medium</td></tr>
+  <tr><td><span class="badge badge-red">HIGH</span></td><td>True footnote placement</td><td>Scholarly edition requirement</td><td>High</td></tr>
+  <tr><td><span class="badge badge-yellow">MED</span></td><td>Template-based CSS (Jinja2)</td><td>Cleaner separation, easier customization</td><td>Medium</td></tr>
+  <tr><td><span class="badge badge-yellow">MED</span></td><td>Widow/orphan + river detection</td><td>Professional QA upgrade</td><td>Medium</td></tr>
+  <tr><td><span class="badge badge-yellow">MED</span></td><td>Crop marks + bleed + ICC profiles</td><td>Professional print-shop readiness</td><td>Medium</td></tr>
+  <tr><td><span class="badge badge-yellow">MED</span></td><td>Progress reporting (tqdm)</td><td>UX improvement for long builds</td><td>Low</td></tr>
+  <tr><td><span class="badge badge-yellow">MED</span></td><td>Watch mode</td><td>Tight feedback during style tuning</td><td>Medium</td></tr>
+  <tr><td><span class="badge badge-green">LOW</span></td><td>Plugin system</td><td>Extensibility for power users</td><td>High</td></tr>
+  <tr><td><span class="badge badge-green">LOW</span></td><td>Clean EPUB / HTML output</td><td>Multi-format publishing</td><td>Medium</td></tr>
+  <tr><td><span class="badge badge-green">LOW</span></td><td>Non-Latin / RTL / PDF/UA</td><td>Broader audience, accessibility</td><td>High</td></tr>
+  <tr><td><span class="badge badge-green">LOW</span></td><td>Interactive QA / visual diff</td><td>Power-user QA workflow</td><td>High</td></tr>
+  <tr><td><span class="badge badge-green">LOW</span></td><td>Batch processing</td><td>Multi-book workflows</td><td>Low</td></tr>
+</table>
+
+<div class="highlight-box">
+  <p><strong>Recommended First Steps:</strong></p>
+  <p>1. Modular package split — the single-script monolith is the biggest barrier to all further development.</p>
+  <p>2. Caching layer — makes style-tuning iteration nearly instant for large books.</p>
+  <p>3. Config validation — low effort, high safety payoff.</p>
+  <p>4. Drop caps + small caps — these are the two most visibly "deluxe" features currently missing from the typographic output.</p>
+</div>
+
+<div class="footer-note">
+  <p><em>Report generated from the project: <code>local_deluxe_epub_pipeline_configurable_with_guide</code></em></p>
+  <p><em>Source script: <code>deluxe_epub_to_pdf.py</code> (~3,620 lines) · Date: June 2026</em></p>
+</div>
+
+</body>
+</html>
