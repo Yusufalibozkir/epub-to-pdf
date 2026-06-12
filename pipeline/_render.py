@@ -200,7 +200,7 @@ def resolve_toc_page_numbers(
     target_pages: dict[str, int] = {}
     link_rows: list[tuple[int, float, float, dict[str, Any]]] = []
     try:
-        for page_index in range(min(doc.page_count, 40)):
+        for page_index in range(doc.page_count):
             page_text = doc[page_index].get_text("text")
             if not re.search(r"\bCONTENTS\b|\bContents\b", page_text):
                 if link_rows:

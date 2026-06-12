@@ -120,7 +120,7 @@ class Settings:
     runner_font_pt: float = 9.4
     runner_letter_spacing_em: float = 0.04
     runner_rule_gap_mm: float = 3.2
-    runner_body_clearance_mm: float = 6.0
+    runner_body_clearance_mm: float = 7.0
     runner_rule_y_mm: float = 17.0
     runner_title_top_mm: float = 8.5
     runner_rule_weight_pt: float = 0.45

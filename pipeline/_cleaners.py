@@ -1009,6 +1009,11 @@ def mark_major_work_descriptions(soup: BeautifulSoup, log: BuildLog) -> None:
             if _looks_like_work_description(text, f"{heading_text} {subtitle_text}".strip()):
                 node["class"] = add_classes(node, ["work-description", "editorial-description", "no-indent"])
                 marked += 1
+                # Continue scanning for multi-paragraph descriptions (up to 5)
+                if marked >= 5:
+                    break
+                node = node.next_sibling
+                continue
             break
     if marked:
         log.warn(f"Styled {marked} post-opener editorial description paragraph(s).")
@@ -1044,17 +1049,18 @@ def mark_standalone_work_description_fragment(
     if not current_work or doc.kind not in {"chapter", "major_work", "unknown"}:
         return
     body = soup.body or soup
-    if body.find(["h1", "h2", "h3", "h4", "table", "img", "svg"]):
+    # Only bail if there's a proper heading (h1/h2); allow h3+ that might be part of the desc
+    if body.find(["h1", "h2", "table", "img", "svg"]):
         return
     paragraphs = [p for p in body.find_all("p", recursive=False) if clean_text(p.get_text(" "))]
-    if not paragraphs or len(paragraphs) > 2:
+    if not paragraphs or len(paragraphs) > 4:
         return
     total_text = clean_text(" ".join(p.get_text(" ") for p in paragraphs))
     if not _looks_like_supplemental_work_description(total_text):
         return
     for p in paragraphs:
         p["class"] = add_classes(p, ["work-description", "editorial-description", "no-indent"])
-    log.warn(f"Styled standalone editorial description fragment for {current_work}.")
+    log.warn(f"Styled standalone editorial description fragment ({len(paragraphs)}p) for {current_work}.")
 
 
 # ======================================================================================
@@ -1222,6 +1228,110 @@ def fragment_is_title_only(frag: str, settings: Settings) -> bool:
 
 
 # ======================================================================================
+# NARROW COLUMN / FLOAT UNWRAPPER
+# ======================================================================================
+
+
+def flatten_narrow_column_layouts(soup: BeautifulSoup, log: BuildLog) -> None:
+    """Unwrap remnant multi-column layouts and narrow float containers from EPUB source.
+
+    Some EPUBs embed column-count CSS or float-based layouts that survive standard
+    attribute stripping. This cleaner detects and flattens them.
+    """
+    body = soup.body or soup
+    flattened = 0
+
+    # 1. Strip column-related inline styles
+    for tag in body.find_all(True):
+        style = (tag.get("style") or "").strip()
+        if not style:
+            continue
+        if re.search(r"column-count|column-width|column-gap|display:\s*(flex|inline-flex|grid)", style, re.I):
+            new_style = re.sub(
+                r"(?:column-count|column-width|column-gap|display)\s*:[^;]+;?\s*",
+                "",
+                style,
+                flags=re.I,
+            ).strip()
+            if new_style:
+                tag["style"] = new_style
+            else:
+                del tag["style"]
+            flattened += 1
+
+    # 2. Unwrap narrow div containers (width < 300px) that have only text children
+    for div in body.find_all("div"):
+        style = (div.get("style") or "").strip()
+        width_match = re.search(r"width\s*:\s*(\d+\.?\d*)\s*(px|mm)", style, re.I) if style else None
+        if not width_match:
+            continue
+        width_val = float(width_match.group(1))
+        unit = width_match.group(2).lower()
+        if unit == "mm":
+            width_val = width_val * 72.0 / 25.4  # convert mm to pt (approx)
+        # If width < 300pt (~105mm), likely a remnant column; unwrap
+        if width_val < 300 and all(
+            c.name in {"p", "span", "em", "strong", "i", "b", "br", "a", None}
+            for c in div.children
+        ):
+            div.unwrap()
+            flattened += 1
+
+    if flattened:
+        log.warn(f"Flattened {flattened} narrow column/float layout(s) from EPUB source.")
+
+
+# ======================================================================================
+# SINGLE-LETTER SPILL MERGER
+# ======================================================================================
+
+
+def merge_single_letter_spills(soup: BeautifulSoup) -> None:
+    """Merge isolated single-letter text nodes back into the previous word.
+
+    Some EPUBs split words across inline elements (e.g., <span>wor</span><span>d</span>),
+    or have orphan first letters from dropped-cap artifacts. This merges them.
+    """
+    for tag in soup.find_all(True):
+        # Skip tags that are explicitly styled as drop caps
+        classes = " ".join(tag.get("class", []) or [])
+        if "drop-cap" in classes:
+            continue
+        children = list(tag.children)
+        for i in range(len(children) - 1, 0, -1):
+            curr = children[i]
+            prev = children[i - 1]
+            # Check: prev ends with text, curr is single-letter text or inline element
+            prev_text = ""
+            curr_text = ""
+            if isinstance(prev, str):
+                prev_text = prev.strip()
+            elif hasattr(prev, "get_text"):
+                prev_text = prev.get_text(" ").strip()
+            if isinstance(curr, str):
+                curr_text = curr.strip()
+            elif hasattr(curr, "get_text"):
+                curr_text = curr.get_text(" ").strip()
+            if (
+                prev_text
+                and len(curr_text) == 1
+                and curr_text.isalpha()
+                and not prev_text[-1].isalnum()
+            ):
+                # Merge the single letter into the previous element
+                if isinstance(prev, str):
+                    prev.replace_with(prev + curr_text)
+                elif hasattr(prev, "append"):
+                    prev.append(curr_text)
+                if isinstance(curr, Tag):
+                    curr.decompose()
+                elif isinstance(curr, str):
+                    # Replace with empty string
+                    curr.replace_with("")
+                break  # Only merge one spill per tag to avoid runaway
+
+
+# ======================================================================================
 # MAIN DOCUMENT CLEANUP ORCHESTRATOR
 # ======================================================================================
 
@@ -1247,6 +1357,7 @@ def clean_document(
     soup = parse_html(doc.raw)
     remove_comments_scripts_styles(soup)
     strip_bad_attributes(soup)
+    flatten_narrow_column_layouts(soup, log)
     remove_local_mini_tocs(soup, log)
     remove_compact_local_contents_blocks(soup, log)
     remove_promotional_blocks(soup, log)
@@ -1273,10 +1384,12 @@ def clean_document(
     current_work = add_synthetic_opener_if_needed(soup, doc, toc, used_ids, current_work)
     current_work, current_division = normalize_headings(soup, doc, toc, used_ids, current_work, current_division)
     mark_major_work_descriptions(soup, log)
+    mark_standalone_work_description_fragment(soup, current_work, doc, log)
     insert_major_opener_separators(soup, settings, log)
     mark_drop_caps(soup, settings, log)
     normalize_small_caps(soup, settings, log)
     remove_duplicate_current_work_title_line(soup, current_work, doc, log)
+    merge_single_letter_spills(soup)
     remove_empty_layout_shells(soup, log)
     mark_standalone_work_description_fragment(soup, current_work, doc, log)
 

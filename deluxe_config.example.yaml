@@ -56,7 +56,7 @@ front_margin_bottom_mm: 24.0  # Front-matter bottom margin override.
 runner_font_pt: 9.4
 runner_letter_spacing_em: 0.04
 runner_rule_gap_mm: 3.2           # Gap between runner text and the horizontal rule.
-runner_body_clearance_mm: 6.0     # Extra normal-page air between runner rule area and body text.
+runner_body_clearance_mm: 7.0     # Extra normal-page air between runner rule area and body text.
 runner_rule_y_mm: 17.0            # Full-width vector runner rule Y-position from top trim.
 runner_title_top_mm: 8.5          # Running-head title offset from top trim.
 runner_rule_weight_pt: 0.45       # Thickness of the vector runner rule.

@@ -260,12 +260,14 @@ body {{ margin: 0; }}
 .toc-list li {{ margin: 0 0 {settings.toc_entry_gap_mm}mm 0; line-height: {settings.toc_line_height}; }}
 .toc-list a {{ color: inherit; text-decoration: none; }}
 .toc-list a::after {{ content: leader('.') target-counter(attr(href), page); }}
-.toc-explicit a {{ display: grid; grid-template-columns: auto 1fr auto; column-gap: .7em; align-items: baseline; }}
+.toc-explicit a {{ display: table; width: 100%; }}
 .toc-explicit a::after {{ content: none; }}
+.toc-explicit .toc-entry-title {{ display: table-cell; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 100%; }}
+.toc-explicit .toc-entry-title::after {{ content: '____________________________________________________'; letter-spacing: .12em; color: #444; overflow: hidden; display: inline; white-space: nowrap; margin-left: .6em; }}
+.toc-explicit .toc-page-number {{ display: table-cell; text-align: right; white-space: nowrap; padding-left: .7em; min-width: 2.2em; }}
 /* Fallback for unresolved TOC entries: use CSS target-counter instead */
 .toc-fallback a {{ color: inherit; text-decoration: none; }}
 .toc-fallback a::after {{ content: leader('.') target-counter(attr(href), page); }}
-.toc-entry-title {{ min-width: 0; }}
 .toc-leader {{ border-bottom: .45pt dotted #444; transform: translateY(-.18em); }}
 .toc-page-number {{ min-width: 2.2em; text-align: right; }}
 .toc-level-1 {{ font-size: {settings.toc_level_1_font_pt}pt; text-transform: uppercase; letter-spacing: .035em; margin-top: 4.8mm !important; }}
@@ -278,7 +280,7 @@ body {{ margin: 0; }}
 .epub-doc.starts-major-work {{ break-before: auto; }}
 .epub-doc.starts-chapter-opener {{ break-before: auto; }}
 .true-blank {{ page: nofolio; break-before: page; break-after: page; height: 0; }}
-h1, h2, h3, h4, h5, h6 {{ font-weight: 400; break-after: avoid-page; page-break-after: avoid; orphans: 4; widows: 4; hyphens: none; }}
+h1, h2, h3, h4, h5, h6 {{ font-weight: 400; orphans: 2; widows: 2; hyphens: none; }}
 h1.major-work, h2.major-work, h1.collection-division, h1.backmatter-opener {{
   page: opener; break-before: page; break-after: page; string-set: current-work content();
   margin: {settings.major_opener_top_margin_mm}mm 0 {settings.major_opener_bottom_margin_mm}mm; text-align: center; font-size: {settings.major_work_font_pt}pt; line-height: 1.08; letter-spacing: .04em; text-transform: uppercase;
@@ -289,7 +291,7 @@ h1.major-work, h2.major-work, h1.collection-division, h1.backmatter-opener {{
 .epub-doc.starts-major-work > h1.backmatter-opener {{ break-before: page; }}
 h1.collection-division {{ font-size: {settings.collection_division_font_pt}pt; letter-spacing: .07em; }}
 h2.subdivision {{
-  break-after: avoid-page; page-break-after: avoid; margin: {settings.subdivision_margin_top_mm}mm 0 {settings.subdivision_margin_bottom_mm}mm; text-align: center; font-size: {settings.subdivision_font_pt}pt; letter-spacing: .035em; text-transform: uppercase;
+  break-after: avoid-page; page-break-after: avoid; orphans: 2; widows: 2; margin: {settings.subdivision_margin_top_mm}mm 0 {settings.subdivision_margin_bottom_mm}mm; text-align: center; font-size: {settings.subdivision_font_pt}pt; letter-spacing: .035em; text-transform: uppercase;
 }}
 h2.part-heading {{
   margin: 0 0 {settings.part_heading_margin_bottom_mm}mm; font-size: {settings.part_heading_font_pt}pt; letter-spacing: .035em;
@@ -307,7 +309,7 @@ h2.subdivision + p, h2.chapter-section-heading + p {{ break-before: avoid-page; 
 h2.act-opening, h2.act-scene-heading, h3.act-scene-heading {{ break-before: page; margin: 22mm 0 7mm; text-align: center; font-size: 14pt; letter-spacing: .06em; text-transform: uppercase; }}
 h3 {{ margin: 8mm 0 4mm; text-align: center; font-size: {settings.h3_font_pt}pt; }}
 h4, h5, h6, .minor-heading {{ margin: 6mm 0 3mm; text-align: center; font-size: {settings.minor_heading_font_pt}pt; font-style: italic; }}
-p {{ margin: 0; text-align: {prose_align}; text-indent: {settings.paragraph_indent_em}em; widows: 4; orphans: 4; }}
+p {{ margin: 0; text-align: {prose_align}; text-indent: {settings.paragraph_indent_em}em; widows: 2; orphans: 2; }}
 h1 + p, h2 + p, h3 + p, h4 + p, .no-indent, blockquote p:first-child, .stage-direction, .cast-list p {{ text-indent: 0; }}
 p.work-description {{
   font-size: {work_description_font_pt}pt; font-style: italic; text-indent: 0; margin: 0 0 {settings.work_description_bottom_margin_mm}mm 0;

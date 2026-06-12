@@ -782,6 +782,11 @@ def build_pipeline(args: Any) -> None:
 
     assert final_verdict is not None and qa_json is not None and qa_txt is not None and build_dir is not None
 
+    # Poetry formatting note
+    if log.detected_poetry_blocks > 0 or log.detected_poetry_sequences > 0:
+        total_poetry = log.detected_poetry_blocks + log.detected_poetry_sequences
+        print(f"Note: {total_poetry} poetry sequence(s) detected — manually inspect verse formatting in the PDF.", file=sys.stderr)
+
     # Write build summary
     build_summary = artifact_dir / "build_summary.json"
     build_summary.write_text(
