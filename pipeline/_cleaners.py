@@ -1243,6 +1243,8 @@ def flatten_narrow_column_layouts(soup: BeautifulSoup, log: BuildLog) -> None:
 
     # 1. Strip column-related inline styles
     for tag in body.find_all(True):
+        if not hasattr(tag, "attrs") or tag.attrs is None:
+            continue
         style = (tag.get("style") or "").strip()
         if not style:
             continue
@@ -1293,6 +1295,9 @@ def merge_single_letter_spills(soup: BeautifulSoup) -> None:
     or have orphan first letters from dropped-cap artifacts. This merges them.
     """
     for tag in soup.find_all(True):
+        # Skip non-element tags or tags with no attrs
+        if not hasattr(tag, "attrs") or tag.attrs is None:
+            continue
         # Skip tags that are explicitly styled as drop caps
         classes = " ".join(tag.get("class", []) or [])
         if "drop-cap" in classes:
