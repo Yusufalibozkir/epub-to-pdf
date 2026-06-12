@@ -956,10 +956,37 @@ def _looks_like_work_description(text: str, heading_text: str) -> bool:
         s,
         re.I,
     )
+    strong_editorial_vocab = re.search(
+        r"\b(published|appeared|written|wrote|composed|completed|novel|novella|story|"
+        r"tale|poem|play|drama|work|collection|translated|first|last|inspired|"
+        r"based|deals with|concerns|tells|features|regarded|acclaimed)\b",
+        s,
+        re.I,
+    )
     bibliographic_marker = re.search(
         r"\b(1[5-9]\d{2}|20\d{2}|Dostoevsky|Dostoyevsky|Tolstoy|Dickens|Balzac|Poe|Gogol|Turgenev)\b", s
     )
-    return bool(editorial_vocab and (title_mentioned or bibliographic_marker))
+    return bool((title_mentioned and strong_editorial_vocab) or (editorial_vocab and bibliographic_marker))
+
+
+def _is_work_description_boundary(node: Tag, text: str) -> bool:
+    """Return True when a node clearly starts the author's text."""
+    if node.name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+        return bool(re.search(r"\b(CHAPTER|BOOK|PART|ACT|SCENE)\b", text, re.I))
+    return bool(re.search(r"\b(CHAPTER|BOOK|PART|ACT|SCENE)\b", text[:80], re.I))
+
+
+def _looks_like_work_description_continuation(text: str) -> bool:
+    """Detect later paragraphs in an already-started editorial description block."""
+    s = clean_text(text)
+    words = visible_word_count(s)
+    if words < 12 or words > 320:
+        return False
+    if re.match(r"^[\"'\"\u201c\u2018\u2014\u2013]", s):
+        return False
+    if re.search(r"\b(CHAPTER|BOOK|PART|SCENE|ACT)\b", s[:80], re.I):
+        return False
+    return True
 
 
 def mark_major_work_descriptions(soup: BeautifulSoup, log: BuildLog) -> None:
@@ -973,7 +1000,8 @@ def mark_major_work_descriptions(soup: BeautifulSoup, log: BuildLog) -> None:
         heading_text = clean_text(heading.get_text(" "))
         subtitle_text = ""
         inspected = 0
-        while node is not None and inspected < 4:
+        in_description = False
+        while node is not None and inspected < 12:
             while isinstance(node, NavigableString) and not clean_text(str(node)):
                 node = node.next_sibling
             if not isinstance(node, Tag):
@@ -983,10 +1011,13 @@ def mark_major_work_descriptions(soup: BeautifulSoup, log: BuildLog) -> None:
                 node = node.next_sibling
                 continue
             inspected += 1
+            if in_description and _is_work_description_boundary(node, text):
+                break
             words = visible_word_count(text)
             if (
                 node.name in {"h2", "h3", "h4"}
                 and not subtitle_text
+                and not in_description
                 and words <= 8
                 and not re.search(r"\b(CHAPTER|BOOK|PART|ACT|SCENE)\b", text, re.I)
             ):
@@ -998,6 +1029,7 @@ def mark_major_work_descriptions(soup: BeautifulSoup, log: BuildLog) -> None:
                 break
             is_short_subtitle = (
                 words <= 8
+                and not in_description
                 and not _looks_like_work_description(text, heading_text)
                 and not re.search(r"\b(CHAPTER|BOOK|PART|ACT|SCENE)\b", text, re.I)
             )
@@ -1006,12 +1038,13 @@ def mark_major_work_descriptions(soup: BeautifulSoup, log: BuildLog) -> None:
                 subtitle_text = text
                 node = node.next_sibling
                 continue
-            if _looks_like_work_description(text, f"{heading_text} {subtitle_text}".strip()):
+            is_description = _looks_like_work_description(text, f"{heading_text} {subtitle_text}".strip())
+            if in_description:
+                is_description = _looks_like_work_description_continuation(text)
+            if is_description:
                 node["class"] = add_classes(node, ["work-description", "editorial-description", "no-indent"])
                 marked += 1
-                # Continue scanning for multi-paragraph descriptions (up to 5)
-                if marked >= 5:
-                    break
+                in_description = True
                 node = node.next_sibling
                 continue
             break

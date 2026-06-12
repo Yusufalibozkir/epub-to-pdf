@@ -99,7 +99,7 @@ def css_text(settings: Settings, font_face_css: str = "") -> str:
         ligature_css = "font-variant-ligatures: common-ligatures;"
 
     rule_css = ""
-    if runner_rule_style != "none":
+    if runner_rule_style in {"single", "split"}:
         rule_css = f"border-bottom: {settings.runner_rule_weight_pt}pt solid {settings.runner_rule_color}; padding-bottom: {settings.runner_rule_gap_mm}mm;"
     split_rule_css = rule_css if runner_rule_style == "split" else ""
 
@@ -109,18 +109,18 @@ def css_text(settings: Settings, font_face_css: str = "") -> str:
   @top-left {{
     content: string(collection-title);
     font-family: {fs}; font-size: {settings.runner_font_pt}pt; letter-spacing: {settings.runner_letter_spacing_em}em; text-transform: {settings.runner_collection_transform};
-    color: #111; vertical-align: top; text-align: left; padding-top: {settings.runner_title_top_mm}mm;
+    color: #111; {rule_css} vertical-align: top; text-align: left; padding-top: {settings.runner_title_top_mm}mm;
     white-space: nowrap; hyphens: none; overflow: hidden; text-overflow: clip; line-height: 1;
   }}
-  @top-center {{ content: normal; }}
-  @top-right {{ content: normal; }}'''
+  @top-center {{ content: normal; border: none; padding: 0; }}
+  @top-right {{ content: normal; border: none; padding: 0; }}'''
         body_right_header_css = f'''
-  @top-left {{ content: normal; }}
-  @top-center {{ content: normal; }}
+  @top-left {{ content: normal; border: none; padding: 0; }}
+  @top-center {{ content: normal; border: none; padding: 0; }}
   @top-right {{
     content: string(current-work);
     font-family: {fs}; font-size: {settings.runner_font_pt}pt; letter-spacing: {settings.runner_letter_spacing_em}em; text-transform: {settings.runner_work_transform};
-    color: #111; vertical-align: top; text-align: right; padding-top: {settings.runner_title_top_mm}mm;
+    color: #111; {rule_css} vertical-align: top; text-align: right; padding-top: {settings.runner_title_top_mm}mm;
     white-space: nowrap; hyphens: none; overflow: hidden; text-overflow: clip; line-height: 1;
   }}'''
     elif runner_layout == "centered_single_rule":
@@ -280,7 +280,7 @@ body {{ margin: 0; }}
 .epub-doc.starts-major-work {{ break-before: auto; }}
 .epub-doc.starts-chapter-opener {{ break-before: auto; }}
 .true-blank {{ page: nofolio; break-before: page; break-after: page; height: 0; }}
-h1, h2, h3, h4, h5, h6 {{ font-weight: 400; orphans: 2; widows: 2; hyphens: none; }}
+h1, h2, h3, h4, h5, h6 {{ font-weight: 400; orphans: 2; widows: 2; hyphens: none; break-after: avoid-page; }}
 h1.major-work, h2.major-work, h1.collection-division, h1.backmatter-opener {{
   page: opener; break-before: page; break-after: page; string-set: current-work content();
   margin: {settings.major_opener_top_margin_mm}mm 0 {settings.major_opener_bottom_margin_mm}mm; text-align: center; font-size: {settings.major_work_font_pt}pt; line-height: 1.08; letter-spacing: .04em; text-transform: uppercase;
@@ -306,6 +306,7 @@ h2.subdivision + h2.chapter-section-heading {{
   margin-top: {settings.chapter_section_margin_top_mm}mm;
 }}
 h2.subdivision + p, h2.chapter-section-heading + p {{ break-before: avoid-page; }}
+h1 + p, h2 + p, h3 + p, h4 + p, h5 + p, h6 + p {{ break-before: avoid-page; widows: 5; orphans: 2; }}
 h2.act-opening, h2.act-scene-heading, h3.act-scene-heading {{ break-before: page; margin: 22mm 0 7mm; text-align: center; font-size: 14pt; letter-spacing: .06em; text-transform: uppercase; }}
 h3 {{ margin: 8mm 0 4mm; text-align: center; font-size: {settings.h3_font_pt}pt; }}
 h4, h5, h6, .minor-heading {{ margin: 6mm 0 3mm; text-align: center; font-size: {settings.minor_heading_font_pt}pt; font-style: italic; }}
