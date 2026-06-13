@@ -114,6 +114,8 @@ verse_line_height: 1.15
 verse_hanging_indent_em: 1.4
 verse_block_margin_top_mm: 4.0
 verse_block_margin_bottom_mm: 5.0
+verse_font_stack: ""                 # Optional CSS font-family override for verse blocks.
+verse_font_size_delta_pt: -0.4        # Verse font size relative to body_size_pt.
 
 # =============================================================================
 # Drama / cast lists

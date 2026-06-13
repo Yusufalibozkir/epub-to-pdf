@@ -140,10 +140,12 @@ class Settings:
     # Major openings / headings
     major_opener_top_margin_mm: float = 55.0
     major_opener_bottom_margin_mm: float = 15.0
+    major_work_description_gap_mm: float = 3.0
     major_work_font_pt: float = 23.5
     collection_division_font_pt: float = 25.0
     work_description_font_delta_pt: float = -1.0
     work_description_bottom_margin_mm: float = 7.0
+    author_note_bottom_margin_mm: float = 7.0
     part_heading_font_pt: float = 11.6
     part_heading_margin_bottom_mm: float = 6.0
     chapter_section_font_pt: float = 11.6
@@ -170,6 +172,8 @@ class Settings:
     verse_hanging_indent_em: float = 1.4
     verse_block_margin_top_mm: float = 4.0
     verse_block_margin_bottom_mm: float = 5.0
+    verse_font_stack: str = ""
+    verse_font_size_delta_pt: float = -0.4
 
     # Drama / cast lists
     cast_max_width_mm: float = 132.0
@@ -292,6 +296,7 @@ class QAVerdict:
     possible_blank_page_artifacts: list[dict[str, Any]] = field(default_factory=list)
     possible_header_collisions: list[dict[str, Any]] = field(default_factory=list)
     possible_narrow_columns: list[dict[str, Any]] = field(default_factory=list)
+    visible_image_filename_artifacts: list[dict[str, Any]] = field(default_factory=list)
     toc_page_number_warnings: list[str] = field(default_factory=list)
     toc_duplicate_warnings: list[str] = field(default_factory=list)
     empty_content_pages: list[dict[str, Any]] = field(default_factory=list)
@@ -305,6 +310,7 @@ class QAVerdict:
     text_qa_issue_lines: list[str] = field(default_factory=list)
     ai_rule_suggestion_file: str = ""
     fonts_seen: list[str] = field(default_factory=list)
+    font_embedding_warnings: list[str] = field(default_factory=list)
     images_seen: int = 0
     qa_renders: list[str] = field(default_factory=list)
     # Typographic QA
@@ -320,6 +326,7 @@ class QAVerdict:
             or self.possible_header_collisions
             or self.possible_line_spills
             or self.toc_duplicate_warnings
+            or self.visible_image_filename_artifacts
             or self.empty_content_pages
             or self.duplicate_title_page_warnings
             or self.opener_page_warnings
@@ -327,5 +334,6 @@ class QAVerdict:
             or self.first_body_folio_warnings
             or self.openai_visual_flags
             or self.text_qa_flags
+            or self.font_embedding_warnings
             or self.possible_orphan_pages
         )

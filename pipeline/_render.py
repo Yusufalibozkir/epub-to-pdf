@@ -31,9 +31,15 @@ def write_build(build_dir: Path, html_doc: str, css: str) -> None:
 def render_pdf(build_dir: Path, out_pdf: Path) -> None:
     from weasyprint import CSS, HTML
 
-    HTML(filename=str(build_dir / "book.html"), base_url=str(build_dir)).write_pdf(
-        str(out_pdf), stylesheets=[CSS(filename=str(build_dir / "style.css"))]
-    )
+    try:
+        HTML(filename=str(build_dir / "book.html"), base_url=str(build_dir)).write_pdf(
+            str(out_pdf), stylesheets=[CSS(filename=str(build_dir / "style.css"))]
+        )
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Cannot write PDF '{out_pdf}'. Close it in any PDF viewer/preview pane, "
+            "or choose a different --out path."
+        ) from exc
 
 
 # ======================================================================================
@@ -580,11 +586,22 @@ def preflight_pdf(
         except Exception:
             pass
         try:
-            images_seen += len(doc.get_page_images(i))
+            page = doc[i]
+            for img in doc.get_page_images(i):
+                xref = img[0]
+                if page.get_image_rects(xref):
+                    images_seen += 1
         except Exception:
             pass
     verdict.fonts_seen = sorted(fonts)
     verdict.images_seen = images_seen
+    if settings and settings.embed_font_files and settings.embedded_font_family:
+        expected_font_key = re.sub(r"[^a-z0-9]+", "", settings.embedded_font_family.lower())
+        seen_font_keys = [re.sub(r"[^a-z0-9]+", "", name.lower()) for name in verdict.fonts_seen]
+        if expected_font_key and not any(expected_font_key in key for key in seen_font_keys):
+            verdict.font_embedding_warnings.append(
+                f"Expected embedded font family '{settings.embedded_font_family}' was not detected in final PDF fonts."
+            )
 
     # Line spills, header clearance, narrow columns, work descriptions
     for i, page in enumerate(doc):
@@ -593,6 +610,17 @@ def preflight_pdf(
         if bad:
             verdict.possible_line_spills.append({"page": i + 1, "lines": bad[:8]})
         text = clean_text(page.get_text("text"))
+        filename_hits = sorted(
+            set(re.findall(r"\b(?:img|image|pic|fig|figure)[_\- ]?\d+\.(?:jpe?g|png|gif|webp)\b", text, flags=re.I))
+        )
+        if filename_hits:
+            verdict.visible_image_filename_artifacts.append(
+                {
+                    "page": i + 1,
+                    "filenames": filename_hits[:12],
+                    "issue": "visible raw image filename text rendered in PDF",
+                }
+            )
         front_or_display = (
             (first_body_index is not None and i < first_body_index)
             or bool(re.search(r"\bCONTENTS\b|\bContents\b", text))
@@ -618,13 +646,19 @@ def preflight_pdf(
             )
 
         drawings = page.get_drawings()
-        imgs = page.get_images(full=True)
-        if not text and (drawings or imgs):
+        visible_image_count = 0
+        for img in page.get_images(full=True):
+            try:
+                if page.get_image_rects(img[0]):
+                    visible_image_count += 1
+            except Exception:
+                pass
+        if not text and (drawings or visible_image_count):
             verdict.possible_blank_page_artifacts.append(
                 {
                     "page": i + 1,
                     "drawings": len(drawings),
-                    "images": len(imgs),
+                    "images": visible_image_count,
                     "issue": "blank-looking page contains graphical objects",
                 }
             )
@@ -832,10 +866,12 @@ def preflight_pdf(
         "",
         "Delivery blockers: " + ("YES" if verdict.has_blockers or log.hard_failures else "NO"),
     ]
+    _append_list(report_lines, "Font embedding warnings", verdict.font_embedding_warnings)
     _append_section(report_lines, "Non-A4 pages", verdict.non_a4_pages)
     _append_section(report_lines, "Possible header/rule collisions", verdict.possible_header_collisions)
     _append_section(report_lines, "Possible broken word/single-letter line spills", verdict.possible_line_spills)
     _append_section(report_lines, "Possible narrow columns", verdict.possible_narrow_columns)
+    _append_section(report_lines, "Visible raw image filename artifacts", verdict.visible_image_filename_artifacts)
     _append_section(report_lines, "Possible blank-page artifacts", verdict.possible_blank_page_artifacts)
     _append_list(report_lines, "TOC page-number warnings", verdict.toc_page_number_warnings)
     _append_list(report_lines, "TOC duplicate warnings", verdict.toc_duplicate_warnings)

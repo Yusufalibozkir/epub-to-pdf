@@ -17,6 +17,7 @@ from typing import Any, Optional
 
 import re
 
+from pipeline import _constants as C
 from pipeline._ai import (
     add_text_qa_flag,
     add_visual_flag,
@@ -66,6 +67,21 @@ from pipeline._plugins import (
 from pipeline._dag import PipelineContext, PipelineDAG, Stage
 
 
+def ensure_output_pdf_writable(out_pdf: Path) -> None:
+    """Fail early if the output PDF cannot be overwritten."""
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    if not out_pdf.exists():
+        return
+    try:
+        with out_pdf.open("r+b"):
+            pass
+    except PermissionError as exc:
+        raise SystemExit(
+            f"Cannot overwrite output PDF: {out_pdf}\n"
+            "Close the PDF in your viewer/preview pane, or choose a different --out path."
+        ) from exc
+
+
 # ======================================================================================
 # Single build pass (DAG-based with caching and plugin support)
 # ======================================================================================
@@ -86,6 +102,7 @@ def build_once(
 
     Returns (verdict, qa_json_path, qa_txt_path, build_dir).
     """
+    ensure_output_pdf_writable(out_pdf)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     build_dir = artifact_dir / "build"
     if build_dir.exists():
@@ -133,16 +150,16 @@ def _create_pipeline_dag() -> PipelineDAG:
     """Build the processing DAG with all stages wired together."""
     dag = PipelineDAG()
 
-    dag.add_stage(Stage("resolve_title", runner=_run_resolve_title, cache_key=_ck_resolve_title, description="Infer book title from EPUB metadata"))
-    dag.add_stage(Stage("read_assets", depends_on=["resolve_title"], runner=_run_read_assets, cache_key=_ck_read_assets, description="Read EPUB and extract images"))
+    dag.add_stage(Stage("resolve_title", runner=_run_resolve_title, cache_key=None, description="Infer book title from EPUB metadata"))
+    dag.add_stage(Stage("read_assets", depends_on=["resolve_title"], runner=_run_read_assets, cache_key=None, description="Read EPUB and extract images"))
     dag.add_stage(Stage("scan_classify", depends_on=["read_assets"], runner=_run_scan_classify, cache_key=_ck_scan_classify, description="Scan and classify spine documents"))
     dag.add_stage(Stage("ai_plan", depends_on=["scan_classify"], runner=_run_ai_plan, cache_key=_ck_ai_plan, description="AI structure planning (optional)"))
-    dag.add_stage(Stage("prepare_fonts", depends_on=["read_assets"], runner=_run_prepare_fonts, cache_key=_ck_prepare_fonts, description="Copy fonts for embedding"))
-    dag.add_stage(Stage("clean_documents", depends_on=["ai_plan", "prepare_fonts"], runner=_run_clean_documents, cache_key=_ck_clean_documents, description="Clean and normalize all documents"))
-    dag.add_stage(Stage("compose_render", depends_on=["clean_documents"], runner=_run_compose_render, cache_key=_ck_compose_render, description="Assemble HTML + CSS and render PDF"))
+    dag.add_stage(Stage("prepare_fonts", depends_on=["read_assets"], runner=_run_prepare_fonts, cache_key=None, description="Copy fonts for embedding"))
+    dag.add_stage(Stage("clean_documents", depends_on=["ai_plan", "prepare_fonts"], runner=_run_clean_documents, cache_key=None, description="Clean and normalize all documents"))
+    dag.add_stage(Stage("compose_render", depends_on=["clean_documents"], runner=_run_compose_render, cache_key=None, description="Assemble HTML + CSS and render PDF"))
     dag.add_stage(Stage("resolve_toc", depends_on=["compose_render"], runner=_run_resolve_toc, cache_key=None, description="Resolve TOC page numbers"))
     dag.add_stage(Stage("post_process", depends_on=["resolve_toc"], runner=_run_post_process, cache_key=None, description="Vector rules, subset, optimize"))
-    dag.add_stage(Stage("run_qa", depends_on=["post_process"], runner=_run_qa, cache_key=_ck_qa, description="PDF preflight QA"))
+    dag.add_stage(Stage("run_qa", depends_on=["post_process"], runner=_run_qa, cache_key=None, description="PDF preflight QA"))
     dag.add_stage(Stage("ai_text_qa", depends_on=["run_qa"], runner=_run_ai_text_qa, cache_key=None, description="AI text QA (optional)"))
     dag.add_stage(Stage("ai_visual_qa", depends_on=["run_qa"], runner=_run_ai_visual_qa, cache_key=None, description="AI visual QA (optional)"))
     return dag
@@ -182,6 +199,7 @@ def _ck_scan_classify(ctx: PipelineContext) -> Optional[str]:
     return PipelineCache.hash_combined(
         PipelineCache.hash_file(epub_path),
         PipelineCache.hash_text(str(ctx.settings.rule_packs)),
+        PipelineCache.hash_text("classification-v4-source-illustrations-frontmatter"),
     )
 
 
@@ -216,6 +234,7 @@ def _ck_clean_documents(ctx: PipelineContext) -> Optional[str]:
         "title": ctx.settings.title,
         "major_opener_blank_before": ctx.settings.major_opener_blank_before,
         "major_opener_blank_after": ctx.settings.major_opener_blank_after,
+        "cleanup_version": "v14-stateful-frontmatter-chapter-cache",
     })
     docs_hash = ctx.data.get("_docs_hash", "")
     return PipelineCache.hash_combined(docs_hash, settings_hash)
@@ -339,15 +358,139 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
     sample_budget = sample_word_budget(args.sample_pages)
     sample_words = 0
 
-    cache: Optional[PipelineCache] = ctx.cache
+    # Per-document cleaning depends on incoming structural state such as the
+    # current work/division. The full stage is already uncached, so avoid
+    # replaying stale fragments with the wrong running-head/TOC context.
+    cache: Optional[PipelineCache] = None
     clean_hash_parts: list[str] = []
     settings_hash = PipelineCache.hash_object({
         "image_policy": settings.image_policy,
         "smart_punctuation": settings.smart_punctuation,
+        "footnote_handling": settings.footnote_handling,
         "title": settings.title,
         "major_opener_blank_before": settings.major_opener_blank_before,
         "major_opener_blank_after": settings.major_opener_blank_after,
+        "cleanup_version": "v14-stateful-frontmatter-chapter-cache",
     })
+
+    audit_list_names = ["removed_blocks", "removed_documents", "kept_images", "removed_images", "warnings", "ai_decisions"]
+    audit_counter_names = [
+        "detected_poetry_blocks",
+        "detected_poetry_sequences",
+        "detected_cast_sections",
+        "normalized_cast_entries",
+        "local_tocs_removed",
+        "typographic_fixes",
+    ]
+
+    def _audit_snapshot() -> dict[str, Any]:
+        return {
+            "lists": {name: len(getattr(log, name)) for name in audit_list_names},
+            "counters": {name: int(getattr(log, name)) for name in audit_counter_names},
+        }
+
+    def _audit_delta(start: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "lists": {
+                name: list(getattr(log, name)[start["lists"][name] :])
+                for name in audit_list_names
+            },
+            "counters": {
+                name: int(getattr(log, name)) - int(start["counters"][name])
+                for name in audit_counter_names
+            },
+        }
+
+    def _replay_audit(delta: Any) -> None:
+        if not isinstance(delta, dict):
+            return
+        lists = delta.get("lists", {})
+        if isinstance(lists, dict):
+            for name in audit_list_names:
+                values = lists.get(name, [])
+                if isinstance(values, list):
+                    getattr(log, name).extend(values)
+        counters = delta.get("counters", {})
+        if isinstance(counters, dict):
+            for name in audit_counter_names:
+                value = counters.get(name, 0)
+                if isinstance(value, int):
+                    setattr(log, name, int(getattr(log, name)) + value)
+
+    def _tag_classes(tag: Any) -> list[str]:
+        classes = tag.get("class", []) if hasattr(tag, "get") else []
+        if isinstance(classes, str):
+            return classes.split()
+        return [str(c) for c in classes]
+
+    def _set_tag_classes(tag: Any, classes: list[str]) -> None:
+        if classes:
+            tag["class"] = list(dict.fromkeys(classes))
+        elif hasattr(tag, "attrs") and "class" in tag.attrs:
+            del tag.attrs["class"]
+
+    def _description_paragraphs(section: Any) -> list[Any]:
+        return [
+            p
+            for p in section.find_all("p")
+            if "work-description" in _tag_classes(p)
+        ]
+
+    def _stitch_description_fragment(frag: str) -> str:
+        """Make split EPUB description fragments render as one continuous block."""
+        if not fragments:
+            return frag
+        cur_soup = _BS(frag, "lxml")
+        cur_section = cur_soup.find("section")
+        if cur_section is None or "editorial-description-fragment" not in _tag_classes(cur_section):
+            return frag
+
+        prev_soup = _BS(fragments[-1], "lxml")
+        prev_section = prev_soup.find("section")
+        if prev_section is None:
+            return frag
+        if prev_section.get("data-current-work") != cur_section.get("data-current-work"):
+            return frag
+
+        prev_paragraphs = _description_paragraphs(prev_section)
+        cur_paragraphs = _description_paragraphs(cur_section)
+        if not prev_paragraphs or not cur_paragraphs:
+            return frag
+
+        prev_last = prev_paragraphs[-1]
+        cur_first = cur_paragraphs[0]
+        prev_classes = [c for c in _tag_classes(prev_last) if c != "work-description-end"]
+        cur_classes = [c for c in _tag_classes(cur_first) if c != "work-description-start"]
+        _set_tag_classes(prev_last, prev_classes)
+        _set_tag_classes(cur_first, cur_classes)
+        fragments[-1] = str(prev_soup)
+        return str(cur_soup)
+
+    def _force_chapter_current_work(frag: str, doc: SpineDoc) -> tuple[str, Optional[str]]:
+        if not clean_text(settings.title):
+            return frag, None
+        title = clean_display_title(settings.title)
+        soup = _BS(frag, "lxml")
+        section = soup.find("section")
+        if section is None:
+            return frag, title
+        first_heading = section.find(["h1", "h2", "h3"])
+        heading_text = clean_text(first_heading.get_text(" ")) if first_heading is not None else ""
+        if doc.kind not in {"chapter", "poetry"} and not C.CHAPTER_HEADINGS.match(heading_text):
+            return frag, None
+        section["data-current-work"] = title
+        marker = section.find("span", class_="set-current-work")
+        if marker is None:
+            marker = soup.new_tag("span")
+            marker["class"] = ["set-current-work"]
+            first = section.find(True, recursive=False)
+            if first is not None:
+                first.insert_before(marker)
+            else:
+                section.append(marker)
+        marker.clear()
+        marker.string = title
+        return str(soup), title
 
     total_docs = len(docs)
     doc_print_interval = max(1, total_docs // 100)  # print ~100 updates max
@@ -372,6 +515,8 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
                 PipelineCache.hash_bytes(doc.raw[:8192]),
                 settings_hash,
                 str(doc.index),
+                PipelineCache.hash_text(str(current_work or "")),
+                PipelineCache.hash_text(str(current_division or "")),
             )
             doc_cache_key = doc_key
             cached = cache.load("doc_clean", doc_key)
@@ -383,10 +528,17 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
             frag, cw, cd = cached_frag_data[0], cached_frag_data[1], cached_frag_data[2]
             current_work = cw if cw else current_work
             current_division = cd if cd else current_division
-            # Rebuild TOC entries from cached fragment
-            # (TOC is re-derived from headings in the fragment, so we need to re-parse)
+            if len(cached_frag_data) >= 5:
+                _replay_audit(cached_frag_data[4])
+            if len(cached_frag_data) >= 6 and isinstance(cached_frag_data[5], list):
+                toc.extend(cached_frag_data[5])
+            if len(cached_frag_data) >= 7 and isinstance(cached_frag_data[6], (list, set, tuple)):
+                used_ids.update(str(x) for x in cached_frag_data[6])
         else:
             # Run the full cleanup
+            audit_start = _audit_snapshot()
+            toc_start = len(toc)
+            used_ids_start = set(used_ids)
             frag, current_work, current_division = clean_document(
                 doc, src_map, settings, toc, used_ids,
                 current_work, current_division, log,
@@ -398,10 +550,22 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
             soup = _BS(frag, "lxml")
             run_plugin_cleaners(soup, settings, log)
             frag = str(soup)
+            forced_frag, forced_current_work = _force_chapter_current_work(frag, doc)
+            if forced_current_work:
+                frag = forced_frag
+                current_work = forced_current_work
 
             # Cache cleaned fragment
             if cache is not None and doc_cache_key is not None:
-                cache_data = (frag, current_work, current_division, doc.index)
+                cache_data = (
+                    frag,
+                    current_work,
+                    current_division,
+                    doc.index,
+                    _audit_delta(audit_start),
+                    list(toc[toc_start:]),
+                    sorted(used_ids - used_ids_start),
+                )
                 try:
                     cache.store("doc_clean", doc_cache_key, cache_data)
                 except Exception:
@@ -412,6 +576,11 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
             continue
 
         if clean_text(_BS(frag, "lxml").get_text(" ")) or "<img" in frag or "<table" in frag:
+            forced_frag, forced_current_work = _force_chapter_current_work(frag, doc)
+            if forced_current_work:
+                frag = forced_frag
+                current_work = forced_current_work
+            frag = _stitch_description_fragment(frag)
             fragments.append(frag)
             sample_words += visible_word_count(_BS(frag, "lxml").get_text(" "))
             clean_hash_parts.append(doc_cache_key or str(doc.index))

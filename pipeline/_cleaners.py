@@ -9,6 +9,7 @@ heading classification, work description styling, and more.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Optional
 
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
@@ -36,7 +37,7 @@ from pipeline._utils import (
 
 
 def strip_bad_attributes(soup: BeautifulSoup) -> None:
-    allowed = {"href", "src", "alt", "title", "id", "class", "colspan", "rowspan"}
+    allowed = {"href", "src", "alt", "title", "id", "class", "colspan", "rowspan", "width", "height"}
     for tag in soup.find_all(True):
         for attr in list(tag.attrs):
             if attr not in allowed:
@@ -49,7 +50,7 @@ def strip_bad_attributes(soup: BeautifulSoup) -> None:
                 c
                 for c in classes
                 if re.search(
-                    r"poem|poetry|verse|stanza|line|cast|character|stage|note|footnote|endnote|chapter|title",
+                    r"poem|poetry|verse|stanza|cast|character|stage|note|footnote|endnote|chapter|title|(?:^|[-_\s])line(?:$|[-_\s])",
                     c,
                     re.I,
                 )
@@ -121,6 +122,34 @@ def _looks_like_promotional_text(tag: Tag, text: str, block: bool = False) -> bo
 # ======================================================================================
 # LOCAL MINI-TOC REMOVAL
 # ======================================================================================
+
+
+SOURCE_CONTENTS_HEADINGS_RE = re.compile(
+    r"^(?:the\s+)?principal\s+contents\.?$|^series\s+contents$|^alphabetical\s+list\s+of\s+titles$|^(?:list\s+of\s+)?illustrations$",
+    re.I,
+)
+
+
+def _is_source_contents_heading(text: str) -> bool:
+    return SOURCE_CONTENTS_HEADINGS_RE.fullmatch(clean_text(text).strip()) is not None
+
+
+def remove_source_contents_apparatus(soup: BeautifulSoup, log: BuildLog) -> None:
+    """Remove source-internal contents/argument-summary files from the print body."""
+    body = soup.body or soup
+    first_heading = body.find(re.compile(r"^h[1-6]$"))
+    if not first_heading:
+        return
+    htext = clean_text(first_heading.get_text(" "))
+    if not _is_source_contents_heading(htext):
+        return
+    log.local_tocs_removed += 1
+    log.removed("Removed source contents apparatus", htext)
+    for child in list(body.children):
+        try:
+            child.extract()
+        except Exception:
+            pass
 
 
 def remove_local_mini_tocs(soup: BeautifulSoup, log: BuildLog) -> None:
@@ -251,10 +280,65 @@ def remove_compact_local_contents_blocks(soup: BeautifulSoup, log: BuildLog) -> 
 # ======================================================================================
 
 
+GENERIC_IMAGE_FILENAME_RE = re.compile(r"^(?:img|image|pic|fig|figure)[_\- ]?\d+\.(?:jpe?g|png|gif|webp)$", re.I)
+
+
+def _generic_image_filename(value: str) -> bool:
+    text = clean_text(value)
+    if not text:
+        return False
+    return GENERIC_IMAGE_FILENAME_RE.fullmatch(Path(text).name) is not None
+
+
+def _image_dimension(img: Tag, attr: str) -> Optional[float]:
+    raw = str(img.get(attr, "") or "").strip()
+    m = re.match(r"^(\d+(?:\.\d+)?)", raw)
+    if not m:
+        return None
+    try:
+        return float(m.group(1))
+    except Exception:
+        return None
+
+
+def _image_is_standalone_block(img: Tag) -> bool:
+    parent = img.parent if isinstance(img.parent, Tag) else None
+    if parent is None or parent.name not in {"p", "div", "figure"}:
+        return False
+    if len(parent.find_all("img")) != 1:
+        return False
+    text = clean_text(parent.get_text(" "))
+    src_text = clean_text(str(img.get("src", "") or ""))
+    alt_text = clean_text(str(img.get("alt", "") or img.get("title", "") or ""))
+    for token in (src_text, alt_text):
+        if token:
+            text = text.replace(token, "")
+    return not clean_text(text)
+
+
+def _clear_generic_image_alt(img: Tag) -> None:
+    for attr in ("alt", "title"):
+        value = str(img.get(attr, "") or "")
+        if _generic_image_filename(value):
+            img.attrs.pop(attr, None)
+
+
+def _looks_like_caption_neighbor(tag: Tag) -> bool:
+    text = clean_text(tag.get_text(" "))
+    if not text:
+        return False
+    class_text = " ".join(tag.get("class", [])) if isinstance(tag.get("class", []), list) else str(tag.get("class", ""))
+    if tag.name == "figcaption" or re.search(r"caption|fig|image|photo|plate", class_text, re.I):
+        return True
+    if visible_word_count(text) <= 18 and not _looks_like_real_prose_or_dialogue(text):
+        return True
+    return False
+
+
 def _img_context(img: Tag) -> str:
     parts: list[str] = []
     alt = img.get("alt") or img.get("title") or ""
-    if alt:
+    if alt and not _generic_image_filename(str(alt)):
         parts.append(str(alt))
     parent = img.parent if isinstance(img.parent, Tag) else None
     if parent:
@@ -264,8 +348,22 @@ def _img_context(img: Tag) -> str:
             parent.find_next(["p", "figcaption", "h1", "h2", "h3"]),
         ]:
             if sib:
-                parts.append(sib.get_text(" "))
+                if re.match(r"h[1-6]", sib.name or "") or _looks_like_caption_neighbor(sib):
+                    parts.append(sib.get_text(" "))
     return clean_text(" ".join(parts))
+
+
+def _looks_like_decorative_or_placeholder_image(img: Tag, src: str, context: str) -> bool:
+    alt = clean_text(str(img.get("alt", "") or img.get("title", "") or ""))
+    width = _image_dimension(img, "width")
+    height = _image_dimension(img, "height")
+    generic_name = _generic_image_filename(alt) or _generic_image_filename(src)
+    standalone = _image_is_standalone_block(img)
+    if generic_name and standalone and width is not None and height is not None and width <= 280 and height <= 140:
+        return True
+    if generic_name and standalone and not context:
+        return True
+    return False
 
 
 def should_keep_image(
@@ -281,6 +379,8 @@ def should_keep_image(
     if settings.image_policy == "keep-all":
         return True
     if settings.image_policy == "remove-all":
+        return False
+    if _looks_like_decorative_or_placeholder_image(img, src, context):
         return False
     lower_src = src.lower()
     combined = clean_text(f"{src} {context}")
@@ -346,6 +446,7 @@ def rewrite_images(
     from pathlib import Path
     for img in list(soup.find_all("img")):
         src = img.get("src") or img.get("href") or ""
+        _clear_generic_image_alt(img)
         norm = normalize_src(src, doc.name)
         mapped = src_map.get(norm) or src_map.get(Path(norm).name)
         if not mapped:
@@ -437,9 +538,13 @@ def _looks_like_real_prose_or_dialogue(text: str) -> bool:
     words = visible_word_count(text)
     if words >= 22:
         return True
-    if re.search(r"^[\"'â€œâ€˜].{8,}", text):
+    if re.search(r"^[\"'\u201c\u2018].{8,}", text):
         return True
-    if re.search(r"[\"'â€â€™][,;:.!?]?\s*(said|asked|cried|replied|answered|whispered|exclaimed|thought)\b", text, re.I):
+    if re.search(
+        r"[\"'\u201d\u2019][,;:.!?]?\s*(said|asked|cried|replied|answered|whispered|exclaimed|thought)\b",
+        text,
+        re.I,
+    ):
         return True
     if re.search(r"\b(I|you|he|she|we|they|my|your|his|her|our|their)\b", text, re.I) and re.search(r"[.!?]$", text):
         return True
@@ -509,6 +614,69 @@ def split_br_verse_block(tag: Tag, soup: BeautifulSoup, log: BuildLog) -> None:
     log.detected_poetry_blocks += 1
 
 
+def normalize_preformatted_verse(soup: BeautifulSoup, doc: SpineDoc, log: BuildLog) -> None:
+    """Convert literary <pre> song/poem blocks into normal verse blocks.
+
+    Gutenberg-style EPUBs often use <pre> to preserve song lineation. Leaving
+    those tags intact makes browsers/WeasyPrint use a monospace font, which is
+    wrong for print prose interiors.
+    """
+    converted = 0
+    codeish_re = re.compile(r"^\s*(?:def|class|function|var|let|const|import|#include)\b|[{}<>]")
+    for pre in list(soup.find_all("pre")):
+        raw = pre.get_text("\n")
+        lines = [line.rstrip() for line in raw.splitlines()]
+        while lines and not clean_text(lines[0]):
+            lines.pop(0)
+        while lines and not clean_text(lines[-1]):
+            lines.pop()
+        nonblank = [clean_text(line) for line in lines if clean_text(line)]
+        if len(nonblank) < 1 or len(nonblank) > 60:
+            continue
+        if visible_word_count(" ".join(nonblank)) > 420:
+            continue
+        codeish_lines = sum(1 for line in nonblank if codeish_re.search(line))
+        if codeish_lines >= max(2, len(nonblank) // 3):
+            continue
+
+        block = soup.new_tag("div")
+        block["class"] = ["verse-block", "pre-verse-block"]
+        for line in nonblank:
+            span = soup.new_tag("span")
+            span["class"] = ["verse-line"]
+            span.string = line
+            block.append(span)
+        pre.replace_with(block)
+        converted += 1
+
+    if converted:
+        merge_adjacent_pre_verse_blocks(soup)
+        doc.contains_poetry = True
+        log.detected_poetry_blocks += converted
+
+
+def merge_adjacent_pre_verse_blocks(soup: BeautifulSoup) -> None:
+    for block in list(soup.find_all(class_=lambda c: c and "pre-verse-block" in str(c).split())):
+        if block.parent is None:
+            continue
+        node = block.next_sibling
+        while isinstance(node, NavigableString) and not clean_text(str(node)):
+            node = node.next_sibling
+        while isinstance(node, Tag):
+            classes = node.get("class", [])
+            if isinstance(classes, str):
+                classes = classes.split()
+            if "pre-verse-block" not in classes:
+                break
+            next_node = node.next_sibling
+            for child in list(node.children):
+                block.append(child.extract())
+            strip_tag(node)
+            node = next_node
+            while isinstance(node, NavigableString) and not clean_text(str(node)):
+                node = node.next_sibling
+
+
 def normalize_poetry(soup: BeautifulSoup, doc: SpineDoc, log: BuildLog) -> None:
     for tag in list(soup.find_all(["p", "div"])):
         if len(tag.find_all("br")) >= 2 and len(clean_text(tag.get_text(" "))) < 2200:
@@ -520,13 +688,14 @@ def normalize_poetry(soup: BeautifulSoup, doc: SpineDoc, log: BuildLog) -> None:
             else str(tag.get("class", ""))
         )
         if C.POETRY_CLASS_RE.search(classes):
+            class_list = tag.get("class", []) if isinstance(tag.get("class", []), list) else [tag.get("class")]
             tag["class"] = list(
                 set(
-                    (tag.get("class", []) if isinstance(tag.get("class", []), list) else [tag.get("class")])
-                    + ["verse-block"]
+                    class_list + ["verse-block"]
                 )
             )
-            log.detected_poetry_blocks += 1
+            if "verse-block" not in class_list:
+                log.detected_poetry_blocks += 1
 
     if not doc.contains_poetry:
         return
@@ -639,6 +808,9 @@ def normalize_inline_footnotes(soup: BeautifulSoup, settings: Settings, log: Bui
       3. Inserts the section at the first footnote reference point.
 
     Proper endnote sections (matching BACKMATTER_PATTERNS) are left untouched.
+    Bare numbered paragraphs like ``1.``/``2.`` are only treated as notes when
+    the surrounding HTML also carries note semantics; numbered body sections are
+    common in older works and must remain in the main text.
     Set ``footnote_handling = "endnotes-only"`` or ``"disabled"`` to skip.
     """
     if settings.footnote_handling == "disabled":
@@ -652,17 +824,51 @@ def normalize_inline_footnotes(soup: BeautifulSoup, settings: Settings, log: Bui
     if is_endnotes_section:
         return
 
-    FOOTNOTE_BODY_RE = re.compile(r"^\[(\d+)\](?:\.)?\s+|^(\d+)[.)]\s+")
+    bracketed_note_re = re.compile(r"^\[(\d+)\](?:\.)?\s+")
+    bare_note_re = re.compile(r"^(\d+)[.)]\s+")
+    note_marker_strip_re = re.compile(r"^(?:\[(?:\d+)\](?:\.)?|\d+[.)])\s*")
+    note_signal_re = re.compile(
+        r"(?:^|[-_\s])(fn|footnote|footnotes|endnote|endnotes|note|notes)(?:$|[-_\s])",
+        re.I,
+    )
+
+    def has_note_semantics(tag: Tag) -> bool:
+        cur: Tag | None = tag
+        while cur is not None and isinstance(cur, Tag):
+            class_text = " ".join(str(c) for c in cur.get("class", []))
+            bits = " ".join(
+                str(x)
+                for x in (
+                    cur.get("id", ""),
+                    cur.get("role", ""),
+                    class_text,
+                )
+                if x
+            )
+            if note_signal_re.search(bits):
+                return True
+            if cur is body:
+                break
+            parent = cur.parent
+            cur = parent if isinstance(parent, Tag) else None
+        return False
+
+    def footnote_body_match(tag: Tag) -> re.Match[str] | None:
+        text = clean_text(tag.get_text(" "))
+        if not text:
+            return None
+        bracketed_match = bracketed_note_re.match(text)
+        if bracketed_match:
+            return bracketed_match
+        if has_note_semantics(tag):
+            return bare_note_re.match(text)
+        return None
 
     candidates: list[Tag] = []
     for tag in list(body.find_all(["p", "div"])):
         if tag.find_parent(["blockquote", "table", "figcaption"]):
             continue
-        text = clean_text(tag.get_text(" "))
-        if not text:
-            continue
-        m = FOOTNOTE_BODY_RE.match(text)
-        if m:
+        if footnote_body_match(tag):
             candidates.append(tag)
 
     # Need at least 2 consecutive footnote bodies to treat as a set
@@ -707,10 +913,10 @@ def normalize_inline_footnotes(soup: BeautifulSoup, settings: Settings, log: Bui
 
         for tag in cluster:
             text = clean_text(tag.get_text(" "))
-            m = FOOTNOTE_BODY_RE.match(text)
+            m = footnote_body_match(tag)
             if not m:
                 continue
-            num = m.group(1) or m.group(2)
+            num = m.group(1)
             # Create footnote element
             fn = soup.new_tag("p")
             fn["class"] = ["footnote"]
@@ -723,7 +929,7 @@ def normalize_inline_footnotes(soup: BeautifulSoup, settings: Settings, log: Bui
             fn.append(marker)
             fn.append(" ")
             # Note text (strip the leading number marker)
-            note_text = re.sub(r"^\[?\d+\]?[.)]?\s*", "", text, count=1)
+            note_text = note_marker_strip_re.sub("", text, count=1)
             fn.append(note_text)
             fn_section.append(fn)
             # Remove original tag
@@ -790,12 +996,14 @@ def promote_paragraph_headings(soup: BeautifulSoup, log: BuildLog) -> None:
         while isinstance(prev, NavigableString) and not clean_text(str(prev)):
             prev = prev.previous_sibling
         follows_heading = isinstance(prev, Tag) and prev.name in {"h1", "h2", "h3", "h4"}
+        looks_like_dialogue = text.startswith(('"', "'", "\u201c", "\u2018"))
         is_section_label = (
             not is_chapter_heading
             and follows_heading
             and text.isupper()
             and visible_word_count(text) <= 5
             and not re.search(r"[.!?]$", text)
+            and not looks_like_dialogue
         )
         if not is_section_label:
             is_section_label = (
@@ -804,6 +1012,7 @@ def promote_paragraph_headings(soup: BeautifulSoup, log: BuildLog) -> None:
                 and text.isupper()
                 and visible_word_count(text) <= 5
                 and not re.search(r"[.!?]$", text)
+                and not looks_like_dialogue
             )
         if not is_chapter_heading and not is_section_label:
             continue
@@ -841,6 +1050,9 @@ def normalize_headings(
         if not text:
             strip_tag(h)
             continue
+        if _is_source_contents_heading(text):
+            strip_tag(h)
+            continue
         h.clear()
         h.string = text
         level = int(h.name[1])
@@ -860,9 +1072,10 @@ def normalize_headings(
             )
         )
         is_backmatter = C.BACKMATTER_PATTERNS.match(text) is not None or doc.kind == "backmatter"
+        is_frontmatter = C.FRONTMATTER_PATTERNS.match(text) is not None or doc.kind == "frontmatter"
         is_chapterish = C.CHAPTER_HEADINGS.match(text) is not None
         is_major = False
-        if level == 1 and not is_chapterish and not is_chapter_section_heading:
+        if level == 1 and not is_chapterish and not is_chapter_section_heading and not is_frontmatter:
             is_major = True
         if doc_major_key and doc_major_key == text_key and doc.kind in {"major_work", "play", "poetry", "backmatter"}:
             is_major = True
@@ -875,6 +1088,9 @@ def normalize_headings(
         elif is_backmatter:
             current_work = text
             h["class"] = add_classes(h, ["backmatter-opener", "formal-opener"])
+        elif is_frontmatter:
+            current_work = text
+            h["class"] = add_classes(h, ["frontmatter-opener", "formal-opener"])
         elif is_major:
             current_work = text
             h["class"] = add_classes(h, ["major-work", "formal-opener"])
@@ -884,6 +1100,8 @@ def normalize_headings(
             h["class"] = add_classes(h, ["subdivision"])
         else:
             h["class"] = add_classes(h, ["minor-heading"])
+        if is_chapterish and re.match(r"^part\b", text, re.I):
+            h["class"] = add_classes(h, ["part-heading"])
         ident = h.get("id") or unique_id(text, used_ids)
         if ident in used_ids:
             ident = unique_id(text, used_ids)
@@ -896,6 +1114,10 @@ def normalize_headings(
             toc.append(
                 TocEntry(1 if not current_division else 2, text, str(ident), "backmatter" if is_backmatter else "work")
             )
+        elif is_frontmatter:
+            toc.append(TocEntry(1 if not current_division else 2, text, str(ident), "frontmatter"))
+        elif is_chapterish and level == 2:
+            toc.append(TocEntry(2 if not current_division else 3, text, str(ident), "chapter"))
         elif level == 2 and not is_chapterish and not is_chapter_section_heading and len(text) < 90:
             toc.append(TocEntry(3 if current_division else 2, text, str(ident), "work"))
     return current_work, current_division
@@ -919,8 +1141,12 @@ def add_synthetic_opener_if_needed(
         return current_work
     if doc.kind not in {"major_work", "play", "backmatter"}:
         return current_work or title
-    first_text = clean_text((soup.body or soup).get_text(" "))[:350].lower()
-    if title.lower() in first_text:
+    # Only skip if a heading element already contains the title — not if it
+    # merely appears in a set-current-work span or body prose snippet.
+    existing_heading = (soup.body or soup).find(
+        lambda t: t.name in {"h1", "h2"} and title.lower() in clean_text(t.get_text(" ")).lower()
+    )
+    if existing_heading is not None:
         return current_work or title
     ident = unique_id(title, used_ids)
     h = soup.new_tag("h1")
@@ -933,10 +1159,60 @@ def add_synthetic_opener_if_needed(
     return title
 
 
+def ensure_frontmatter_opener(
+    soup: BeautifulSoup, doc: SpineDoc, toc: list[TocEntry], used_ids: set[str], current_work: Optional[str]
+) -> Optional[str]:
+    if doc.kind != "frontmatter" or not doc.major_title:
+        return current_work
+    title = clean_display_title(doc.major_title)
+    body = soup.body or soup
+    existing = body.find(
+        lambda t: t.name in {"h1", "h2", "h3"} and normalized_title_key(t.get_text(" ")) == normalized_title_key(title)
+    )
+    if existing is not None:
+        return current_work or title
+    ident = unique_id(title, used_ids)
+    h = soup.new_tag("h2")
+    h["class"] = ["frontmatter-opener", "formal-opener", "synthetic-opener"]
+    h["id"] = ident
+    h.string = title
+    first = first_significant_tag(body)
+    if first is not None:
+        first.insert_before(h)
+    else:
+        body.append(h)
+    title_key = normalized_title_key(title)
+    if not any(normalized_title_key(e.title) == title_key for e in toc):
+        toc.append(TocEntry(1, title, ident, "frontmatter"))
+    return title
+
+
+def _looks_like_authorial_note(text: str) -> bool:
+    """Detect authorial notes that should NOT be styled as editorial descriptions.
+
+    These are the author's own prefatory remarks (e.g. 'AUTHOR'S NOTE',
+    'The author of the diary...'), distinct from Delphi editorial blurbs.
+    """
+    s = text.strip()
+    # "AUTHOR'S NOTE" / "AUTHOR'S NOTE" — any curly/smart apostrophe variant
+    if re.search(r"\bAUTHOR[\u2019'`\u02BC]S\s+NOTE\b", s, re.I):
+        return True
+    # Lines beginning with "* The author of the diary..."
+    if re.match(r"^\*?\s*The\s+author\s+of\s+the\s+diary", s, re.I):
+        return True
+    # "AUTHORIAL NOTE" or similar
+    if re.search(r"\bAUTHORIAL\s+NOTE\b", s, re.I):
+        return True
+    return False
+
+
 def _looks_like_work_description(text: str, heading_text: str) -> bool:
     """Detect Delphi-style editorial blurbs after major work titles."""
     s = clean_text(text)
     if not s:
+        return False
+    # Guard: authorial notes are NOT editorial descriptions
+    if _looks_like_authorial_note(s):
         return False
     words = visible_word_count(s)
     if words < 18 or words > 260:
@@ -969,11 +1245,22 @@ def _looks_like_work_description(text: str, heading_text: str) -> bool:
     return bool((title_mentioned and strong_editorial_vocab) or (editorial_vocab and bibliographic_marker))
 
 
+WORK_DESCRIPTION_BOUNDARY_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:chapter|book|part|act|scene)\s+(?:[ivxlcdm]+|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b"
+    r"|(?:the\s+)?author[’']?s\s+preface\b"
+    r"|preface\s+to\b"
+    r"|dedication\b"
+    r")",
+    re.I,
+)
+
+
 def _is_work_description_boundary(node: Tag, text: str) -> bool:
     """Return True when a node clearly starts the author's text."""
     if node.name in {"h1", "h2", "h3", "h4", "h5", "h6"}:
-        return bool(re.search(r"\b(CHAPTER|BOOK|PART|ACT|SCENE)\b", text, re.I))
-    return bool(re.search(r"\b(CHAPTER|BOOK|PART|ACT|SCENE)\b", text[:80], re.I))
+        return bool(C.CHAPTER_HEADINGS.match(text) or WORK_DESCRIPTION_BOUNDARY_RE.search(text))
+    return bool(WORK_DESCRIPTION_BOUNDARY_RE.search(text))
 
 
 def _looks_like_work_description_continuation(text: str) -> bool:
@@ -984,15 +1271,30 @@ def _looks_like_work_description_continuation(text: str) -> bool:
         return False
     if re.match(r"^[\"'\"\u201c\u2018\u2014\u2013]", s):
         return False
-    if re.search(r"\b(CHAPTER|BOOK|PART|SCENE|ACT)\b", s[:80], re.I):
+    if WORK_DESCRIPTION_BOUNDARY_RE.search(s):
         return False
     return True
+
+
+def _mark_work_description_run(nodes: list[Tag]) -> int:
+    """Mark adjacent description paragraphs as one typographic block."""
+    if not nodes:
+        return 0
+    for idx, node in enumerate(nodes):
+        classes = ["work-description", "editorial-description", "no-indent"]
+        if idx == 0:
+            classes.append("work-description-start")
+        if idx == len(nodes) - 1:
+            classes.append("work-description-end")
+        node["class"] = add_classes(node, classes)
+    return len(nodes)
 
 
 def mark_major_work_descriptions(soup: BeautifulSoup, log: BuildLog) -> None:
     """Style editorial blurbs after major work titles as smaller italic apparatus."""
     body = soup.body or soup
-    marked = 0
+    description_count = 0
+    author_note_count = 0
     for heading in list(
         body.find_all(["h1", "h2"], class_=lambda c: c and "major-work" in str(c).split())
     ):
@@ -1001,6 +1303,7 @@ def mark_major_work_descriptions(soup: BeautifulSoup, log: BuildLog) -> None:
         subtitle_text = ""
         inspected = 0
         in_description = False
+        description_run: list[Tag] = []
         while node is not None and inspected < 12:
             while isinstance(node, NavigableString) and not clean_text(str(node)):
                 node = node.next_sibling
@@ -1042,14 +1345,41 @@ def mark_major_work_descriptions(soup: BeautifulSoup, log: BuildLog) -> None:
             if in_description:
                 is_description = _looks_like_work_description_continuation(text)
             if is_description:
-                node["class"] = add_classes(node, ["work-description", "editorial-description", "no-indent"])
-                marked += 1
+                description_run.append(node)
                 in_description = True
                 node = node.next_sibling
                 continue
+            # Authorial notes (e.g. "AUTHOR'S NOTE") are separate from editorial descriptions.
+            if not in_description and _looks_like_authorial_note(text):
+                node["class"] = add_classes(node, ["author-note", "no-indent"])
+                author_note_count += 1
+                node = node.next_sibling
+                continue
             break
-    if marked:
-        log.warn(f"Styled {marked} post-opener editorial description paragraph(s).")
+        description_count += _mark_work_description_run(description_run)
+    # Some EPUBs put an authorial note after a normalized title/subtitle rather
+    # than a major-work opener. Tag only the note, not arbitrary post-heading prose.
+    for heading in list(
+        body.find_all(
+            ["h1", "h2", "h3"],
+            class_=lambda c: c
+            and any(x in str(c).split() for x in ["subdivision", "chapter-section-heading"]),
+        )
+    ):
+        node = heading.find_next_sibling()
+        while isinstance(node, NavigableString) and not clean_text(str(node)):
+            node = node.next_sibling
+        if not isinstance(node, Tag) or node.name != "p":
+            continue
+        text = clean_text(node.get_text(" "))
+        if _looks_like_authorial_note(text):
+            node["class"] = add_classes(node, ["author-note", "no-indent"])
+            author_note_count += 1
+
+    if description_count:
+        log.warn(f"Styled {description_count} post-opener editorial description paragraph(s).")
+    if author_note_count:
+        log.warn(f"Styled {author_note_count} authorial note paragraph(s) as prefatory text.")
 
 
 def _looks_like_supplemental_work_description(text: str) -> bool:
@@ -1069,7 +1399,8 @@ def _looks_like_supplemental_work_description(text: str) -> bool:
     return bool(
         re.search(
             r"\b(author|translator|editor|published|publication|unfinished|fragment|prologue|"
-            r"novel|novella|story|poem|play|sketch|exile|arrest|execution|Siberia)\b",
+            r"novel|novella|story|poem|play|sketch|exile|arrest|execution|Siberia|"
+            r"writer|philosopher|antiquary|biographer|pupil|pupils)\b",
             s,
             re.I,
         )
@@ -1091,9 +1422,71 @@ def mark_standalone_work_description_fragment(
     total_text = clean_text(" ".join(p.get_text(" ") for p in paragraphs))
     if not _looks_like_supplemental_work_description(total_text):
         return
-    for p in paragraphs:
-        p["class"] = add_classes(p, ["work-description", "editorial-description", "no-indent"])
+    _mark_work_description_run(paragraphs)
     log.warn(f"Styled standalone editorial description fragment ({len(paragraphs)}p) for {current_work}.")
+
+
+def _uppercase_letter_ratio(text: str) -> float:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return 0.0
+    return sum(1 for ch in letters if ch.isupper()) / len(letters)
+
+
+def _looks_like_source_title_page_title(text: str) -> bool:
+    words = visible_word_count(text)
+    if words < 2 or words > 14:
+        return False
+    if WORK_DESCRIPTION_BOUNDARY_RE.search(text):
+        return False
+    return _uppercase_letter_ratio(text) >= 0.62
+
+
+def _looks_like_source_title_page_apparatus(paragraphs: list[Tag], current_work: Optional[str]) -> bool:
+    if len(paragraphs) < 3 or len(paragraphs) > 12:
+        return False
+    lines = [clean_text(p.get_text(" ")) for p in paragraphs if clean_text(p.get_text(" "))]
+    if len(lines) != len(paragraphs):
+        return False
+    if not _looks_like_source_title_page_title(lines[0]):
+        return False
+    total_text = clean_text(" ".join(lines))
+    words = visible_word_count(total_text)
+    if words < 30 or words > 220:
+        return False
+    if current_work and normalized_title_key(total_text) == normalized_title_key(current_work):
+        return False
+    if any(visible_word_count(line) > 70 for line in lines[1:]):
+        return False
+    apparatus_signal = re.search(
+        r"\b(dissertation|containing|together with|printed by|london|translated|edition|"
+        r"rudiments|government and society|by\s+[A-Z][A-Za-z]+|1[5-9]\d{2})\b",
+        total_text,
+        re.I,
+    )
+    return bool(apparatus_signal)
+
+
+def mark_standalone_prefatory_apparatus_fragment(
+    soup: BeautifulSoup, current_work: Optional[str], doc: SpineDoc, log: BuildLog
+) -> None:
+    """Style split source title/imprint pages before the real text begins.
+
+    These pages are part of the edition apparatus, not the body text. Keep the
+    source title line roman, then italicize the explanatory/imprint lines until
+    the next real heading/drop-cap document starts.
+    """
+    if not current_work or doc.kind not in {"chapter", "major_work", "unknown"}:
+        return
+    body = soup.body or soup
+    if body.find(["h1", "h2", "table", "img", "svg"]):
+        return
+    paragraphs = [p for p in body.find_all("p", recursive=False) if clean_text(p.get_text(" "))]
+    if not _looks_like_source_title_page_apparatus(paragraphs, current_work):
+        return
+    paragraphs[0]["class"] = add_classes(paragraphs[0], ["source-title-page-title", "no-indent"])
+    _mark_work_description_run(paragraphs[1:])
+    log.warn(f"Styled standalone prefatory apparatus fragment ({len(paragraphs)}p) for {current_work}.")
 
 
 # ======================================================================================
@@ -1129,6 +1522,72 @@ def insert_major_opener_separators(soup: BeautifulSoup, settings: Settings, log:
 # ======================================================================================
 
 
+def _replace_text_node_with_parts(node: NavigableString, parts: list[Any]) -> None:
+    """Replace one text node with text/tag parts while preserving sibling order."""
+    if not parts:
+        return
+    first = parts[0]
+    node.replace_with(first)
+    previous = first
+    for part in parts[1:]:
+        previous.insert_after(part)
+        previous = part
+
+
+def _wrap_first_alpha_text_node(soup: BeautifulSoup, tag: Tag, class_name: str) -> bool:
+    """Wrap the first visible alphabetic character in tag without serializing HTML."""
+    for text_node in tag.descendants:
+        if not isinstance(text_node, NavigableString) or isinstance(text_node, Comment):
+            continue
+        text = str(text_node)
+        for idx, ch in enumerate(text):
+            if ch.isspace():
+                continue
+            if not ch.isalpha():
+                return False
+            span = soup.new_tag("span")
+            span["class"] = [class_name]
+            span.string = ch
+            parts: list[Any] = []
+            if idx:
+                parts.append(NavigableString(text[:idx]))
+            parts.append(span)
+            if idx + 1 < len(text):
+                parts.append(NavigableString(text[idx + 1 :]))
+            _replace_text_node_with_parts(text_node, parts)
+            return True
+    return False
+
+
+def _wrap_pattern_matches_in_text_node(
+    soup: BeautifulSoup,
+    node: NavigableString,
+    pattern: re.Pattern[str],
+    class_name: str,
+) -> bool:
+    """Wrap regex matches in one text node without reparsing generated markup."""
+    text = str(node)
+    parts: list[Any] = []
+    last = 0
+    for match in pattern.finditer(text):
+        start, end = match.span(1)
+        if start < last:
+            continue
+        if start > last:
+            parts.append(NavigableString(text[last:start]))
+        span = soup.new_tag("span")
+        span["class"] = [class_name]
+        span.string = match.group(1)
+        parts.append(span)
+        last = end
+    if not parts:
+        return False
+    if last < len(text):
+        parts.append(NavigableString(text[last:]))
+    _replace_text_node_with_parts(node, parts)
+    return True
+
+
 def mark_drop_caps(soup: BeautifulSoup, settings: Settings, log: BuildLog) -> None:
     """Wrap the first letter of the first paragraph after chapter headings.
 
@@ -1153,8 +1612,8 @@ def mark_drop_caps(soup: BeautifulSoup, settings: Settings, log: BuildLog) -> No
                 continue
             text = clean_text(node.get_text(" "))
             if not text or text.startswith('"') or text.startswith("'") or text.startswith("\u201c"):
-                node = node.next_sibling
-                continue
+                # Chapter opens with dialogue — don't drop-cap the *next* paragraph.
+                break
             # Check it's not already a special class
             classes = " ".join(node.get("class", [])) if isinstance(node.get("class", []), list) else str(node.get("class", ""))
             if any(x in classes for x in ["work-description", "work-subtitle", "no-indent", "stage-direction", "cast-list"]):
@@ -1168,22 +1627,8 @@ def mark_drop_caps(soup: BeautifulSoup, settings: Settings, log: BuildLog) -> No
             first_char = stripped[0]
             if not first_char.isalpha():
                 break
-            # Wrap the first letter in a drop-cap span
-            original_html = str(node)
-            # Replace first occurrence of first_char in the rendered text
-            # Use a regex that matches the first letter in the HTML
-            import re as _re
-            new_html = _re.sub(
-                r"\b(" + _re.escape(first_char) + r")",
-                r'<span class="drop-cap">\1</span>',
-                original_html,
-                count=1,
-            )
-            if new_html != original_html:
-                new_soup = BeautifulSoup(new_html, "lxml")
-                new_tag = new_soup.find(node.name)
-                if new_tag:
-                    node.replace_with(new_tag)
+            _wrap_first_alpha_text_node(soup, node, "drop-cap")
+            node["class"] = add_classes(node, ["drop-cap-paragraph"])
             break
 
 
@@ -1221,14 +1666,9 @@ def normalize_small_caps(soup: BeautifulSoup, settings: Settings, log: BuildLog)
         parent = node.parent
         if parent and parent.name in skip_parents:
             continue
-        text = str(node)
-        new_text = small_caps_abbr.sub(r'<span class="small-caps">\1</span>', text)
-        if "<span" in new_text:
-            new_soup = BeautifulSoup(f"<span>{new_text}</span>", "lxml")
-            replacement = new_soup.span
-            if replacement:
-                replacement = replacement.extract()
-                node.replace_with(replacement)
+        if parent and "small-caps" in parent.get("class", []):
+            continue
+        _wrap_pattern_matches_in_text_node(soup, node, small_caps_abbr, "small-caps")
 
 
 
@@ -1244,6 +1684,10 @@ def fragment_is_title_only(frag: str, settings: Settings) -> bool:
     text = clean_text(soup.get_text(" "))
     if not text:
         return True
+    for heading in soup.find_all(["h1", "h2", "h3"]):
+        heading_text = clean_text(heading.get_text(" "))
+        if re.match(r"^part\b", heading_text, re.I):
+            return False
     words = visible_word_count(text)
     key = normalized_title_key(text)
     title_key = normalized_title_key(settings.title)
@@ -1395,6 +1839,7 @@ def clean_document(
     soup = parse_html(doc.raw)
     remove_comments_scripts_styles(soup)
     strip_bad_attributes(soup)
+    remove_source_contents_apparatus(soup, log)
     flatten_narrow_column_layouts(soup, log)
     remove_local_mini_tocs(soup, log)
     remove_compact_local_contents_blocks(soup, log)
@@ -1415,14 +1860,17 @@ def clean_document(
         simple_typographic_cleanup(soup, log)
     normalize_notes_refs(soup)
     normalize_inline_footnotes(soup, settings, log)
+    normalize_preformatted_verse(soup, doc, log)
     normalize_poetry(soup, doc, log)
     remove_compact_local_contents_blocks(soup, log)
     normalize_cast_and_drama(soup, log)
     promote_paragraph_headings(soup, log)
     current_work = add_synthetic_opener_if_needed(soup, doc, toc, used_ids, current_work)
     current_work, current_division = normalize_headings(soup, doc, toc, used_ids, current_work, current_division)
+    current_work = ensure_frontmatter_opener(soup, doc, toc, used_ids, current_work)
     mark_major_work_descriptions(soup, log)
     mark_standalone_work_description_fragment(soup, current_work, doc, log)
+    mark_standalone_prefatory_apparatus_fragment(soup, current_work, doc, log)
     insert_major_opener_separators(soup, settings, log)
     mark_drop_caps(soup, settings, log)
     normalize_small_caps(soup, settings, log)
@@ -1430,6 +1878,11 @@ def clean_document(
     merge_single_letter_spills(soup)
     remove_empty_layout_shells(soup, log)
     mark_standalone_work_description_fragment(soup, current_work, doc, log)
+    mark_standalone_prefatory_apparatus_fragment(soup, current_work, doc, log)
+    current_work = ensure_frontmatter_opener(soup, doc, toc, used_ids, current_work)
+    if doc.kind in {"chapter", "poetry"} and clean_text(settings.title):
+        if not current_work or C.FRONTMATTER_PATTERNS.match(current_work):
+            current_work = clean_display_title(settings.title) or None
 
     body = soup.body or soup
     for tag in list(body.find_all(["p", "div"])):
@@ -1451,7 +1904,12 @@ def clean_document(
         first_classes = first_tag.get("class", [])
         if isinstance(first_classes, str):
             first_classes = first_classes.split()
-        if "major-work" in first_classes or "collection-division" in first_classes or "backmatter-opener" in first_classes:
+        if (
+            "major-work" in first_classes
+            or "collection-division" in first_classes
+            or "backmatter-opener" in first_classes
+            or "frontmatter-opener" in first_classes
+        ):
             wrapper_classes.append("starts-major-work")
         elif first_tag.name in {"h1", "h2", "h3"}:
             ft = clean_text(first_tag.get_text(" "))
@@ -1466,16 +1924,22 @@ def clean_document(
         for child in body.children
         if isinstance(child, Tag) and clean_text(child.get_text(" "))
     ]
-    if direct_content_tags and all(
-        "work-description"
-        in (
-            child.get("class", [])
-            if not isinstance(child.get("class", []), str)
-            else child.get("class", "").split()
-        )
-        for child in direct_content_tags
-    ):
-        wrapper_classes.append("editorial-description-fragment")
+    if direct_content_tags:
+        has_description = False
+        all_description_fragment = True
+        for child in direct_content_tags:
+            child_classes = child.get("class", [])
+            if isinstance(child_classes, str):
+                child_classes = child_classes.split()
+            if "work-description" in child_classes:
+                has_description = True
+                continue
+            if "source-title-page-title" in child_classes:
+                continue
+            all_description_fragment = False
+            break
+        if has_description and all_description_fragment:
+            wrapper_classes.append("editorial-description-fragment")
     attrs = f'class="{" ".join(wrapper_classes)}"'
     if current_work:
         attrs += f' data-current-work="{html_escape(current_work)}"'

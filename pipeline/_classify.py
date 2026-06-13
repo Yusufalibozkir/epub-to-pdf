@@ -135,6 +135,7 @@ def scan_spine_items(items: list[Any]) -> list[SpineDoc]:
         )
         heuristic_classify_doc(doc)
         docs.append(doc)
+    _mark_early_orphan_frontmatter_media(docs)
     return docs
 
 
@@ -158,6 +159,20 @@ def heuristic_classify_doc(doc: SpineDoc) -> None:
         first_heading = clean_text(re.sub(r"^H\d:\s*", "", doc.headings[0]))
     sample = doc.text_sample
     sample_l = sample.lower()
+
+    if _looks_like_source_contents_document(first_heading, sample, doc.text_length):
+        doc.kind = "local_toc"
+        doc.remove = True
+        doc.confidence = 0.90
+        doc.notes = "Removed source contents/argument-summary apparatus."
+        return
+
+    if _looks_like_delphi_books_apparatus(doc, first_heading, sample):
+        doc.kind = "promo"
+        doc.remove = True
+        doc.confidence = 0.88
+        doc.notes = "Removed Delphi-style frontmatter 'The Books' apparatus."
+        return
 
     # Project Gutenberg license boilerplate
     if re.search(
@@ -184,7 +199,10 @@ def heuristic_classify_doc(doc: SpineDoc) -> None:
         doc.remove = True
         doc.confidence = 0.80
 
-    if C.BACKMATTER_PATTERNS.match(first_heading or ""):
+    if C.FRONTMATTER_PATTERNS.match(first_heading or ""):
+        doc.kind = "frontmatter"
+        doc.major_title = first_heading
+    elif C.BACKMATTER_PATTERNS.match(first_heading or ""):
         doc.kind = "backmatter"
         doc.major_title = first_heading
     elif C.COLLECTION_DIVISIONS.match(first_heading or ""):
@@ -206,3 +224,71 @@ def heuristic_classify_doc(doc: SpineDoc) -> None:
 
     if doc.kind == "unknown":
         doc.kind = "chapter"
+
+
+def _looks_like_source_contents_document(first_heading: str, sample: str, text_length: int) -> bool:
+    heading = clean_text(first_heading).strip(" .")
+    if re.fullmatch(r"(the\s+)?principal\s+contents", heading, flags=re.I):
+        return True
+    if re.fullmatch(r"series\s+contents|alphabetical\s+list\s+of\s+titles", heading, flags=re.I):
+        return True
+    if re.fullmatch(r"(list\s+of\s+)?illustrations", heading, flags=re.I):
+        return text_length < 12000
+    if re.fullmatch(r"contents|table\s+of\s+contents", heading, flags=re.I):
+        return text_length < 12000
+    first_words = clean_text(sample)[:500]
+    if re.match(r"^(the\s+)?principal\s+contents\b", first_words, flags=re.I):
+        return True
+    if re.match(r"^(list\s+of\s+)?illustrations\b", first_words, flags=re.I):
+        return True
+    return False
+
+
+def _looks_like_delphi_books_apparatus(doc: SpineDoc, first_heading: str, sample: str) -> bool:
+    """Detect Delphi Classics' generic 'The Books' frontmatter gallery pages."""
+    heading = clean_text(first_heading).strip(" .")
+    if doc.index > 20 or not re.fullmatch(r"the\s+books", heading, flags=re.I):
+        return False
+    if doc.text_length > 1800:
+        return False
+    text = clean_text(sample).lower()
+    return doc.contains_images or any(
+        phrase in text
+        for phrase in (
+            "delphi classics",
+            "born in",
+            "modern maps",
+            "market town",
+            "village",
+        )
+    )
+
+
+def _mark_early_orphan_frontmatter_media(docs: list[SpineDoc]) -> None:
+    """Remove short image/caption fragments attached to removed early frontmatter."""
+    seen_real_work = False
+    after_removed_books_apparatus = False
+    for doc in docs:
+        if not doc.remove and doc.kind == "major_work":
+            seen_real_work = True
+            after_removed_books_apparatus = False
+            continue
+
+        if (
+            not seen_real_work
+            and after_removed_books_apparatus
+            and doc.index <= 25
+            and doc.contains_images
+            and not doc.headings
+            and doc.text_length < 350
+        ):
+            doc.kind = "promo"
+            doc.remove = True
+            doc.confidence = max(doc.confidence, 0.86)
+            doc.notes = "Removed orphan frontmatter image/caption after 'The Books' apparatus."
+            after_removed_books_apparatus = True
+            continue
+
+        after_removed_books_apparatus = bool(
+            doc.remove and "The Books" in (doc.notes or "")
+        )

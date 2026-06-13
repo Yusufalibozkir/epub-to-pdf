@@ -58,8 +58,12 @@ BACKMATTER_PATTERNS: re.Pattern = _register("BACKMATTER_PATTERNS",
     r"biography|chronology|translator'?s notes?|editor'?s notes?|commentary|source notes?)$",
 )
 
+FRONTMATTER_PATTERNS: re.Pattern = _register("FRONTMATTER_PATTERNS",
+    r"^(preface|foreword|introduction|prologue|author'?s note|note by the author)$",
+)
+
 LOCAL_TOC_HEADINGS: re.Pattern = _register("LOCAL_TOC_HEADINGS",
-    r"^(contents|table of contents|chapter list|list of chapters)$",
+    r"^(contents|table of contents|chapter list|list of chapters|illustrations|list of illustrations)$",
 )
 
 COLLECTION_DIVISIONS: re.Pattern = _register("COLLECTION_DIVISIONS",
@@ -138,6 +142,7 @@ ROMAN_RE: re.Pattern = _register("ROMAN_RE", r"^[ivxlcdm]+$", re.I)
 RULE_PACK_KEYS: dict[str, str] = {
     "promo_patterns": "PROMO_PATTERNS",
     "backmatter_patterns": "BACKMATTER_PATTERNS",
+    "frontmatter_patterns": "FRONTMATTER_PATTERNS",
     "local_toc_headings": "LOCAL_TOC_HEADINGS",
     "collection_divisions": "COLLECTION_DIVISIONS",
     "major_work_hints": "MAJOR_WORK_HINTS",

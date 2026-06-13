@@ -152,7 +152,7 @@ Quick command-line overrides still work and take priority over the config:
 python deluxe_epub_to_pdf.py "book.epub" --config my_style.yaml --body-size 12 --line-height 1.28 --sample-pages 50
 ```
 
-Common config keys include `body_size_pt`, `line_height`, `font_stack`, `margin_top_mm`, `margin_side_mm`, `margin_bottom_mm`, `runner_font_pt`, `folio_font_pt`, `runner_rule_y_mm`, `runner_title_top_mm`, `runner_body_clearance_mm`, `paragraph_indent_em`, `work_description_font_delta_pt`, `work_description_bottom_margin_mm`, `part_heading_font_pt`, `chapter_section_font_pt`, `verse_line_height`, `verse_max_width_mm`, and `image_policy`. See `deluxe_config.example.yaml` for the full list.
+Common config keys include `body_size_pt`, `line_height`, `font_stack`, `margin_top_mm`, `margin_side_mm`, `margin_bottom_mm`, `runner_font_pt`, `folio_font_pt`, `runner_rule_y_mm`, `runner_title_top_mm`, `runner_body_clearance_mm`, `paragraph_indent_em`, `work_description_font_delta_pt`, `work_description_bottom_margin_mm`, `part_heading_font_pt`, `chapter_section_font_pt`, `verse_line_height`, `verse_max_width_mm`, `verse_font_size_delta_pt`, and `image_policy`. See `deluxe_config.example.yaml` for the full list.
 
 The default typography is EB Garamond. The project embeds local font files from `fonts/` by default, controlled by `embed_font_files`, `font_dir`, `embedded_font_family`, `embedded_font_regular`, `embedded_font_italic`, and `embedded_font_weight`. This prevents WeasyPrint from silently falling back to Times New Roman or a system Garamond when EB Garamond is not installed.
 

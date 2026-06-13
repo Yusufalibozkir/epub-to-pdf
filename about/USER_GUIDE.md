@@ -472,6 +472,8 @@ verse_line_height: 1.15
 verse_hanging_indent_em: 1.4
 verse_block_margin_top_mm: 4.0
 verse_block_margin_bottom_mm: 5.0
+verse_font_stack: ""
+verse_font_size_delta_pt: -0.4
 ```
 
 | Key | Meaning |
@@ -481,6 +483,8 @@ verse_block_margin_bottom_mm: 5.0
 | `verse_hanging_indent_em` | Indent for runover/wrapped verse lines. |
 | `verse_block_margin_top_mm` | Space above verse blocks. |
 | `verse_block_margin_bottom_mm` | Space below verse blocks. |
+| `verse_font_stack` | Optional CSS font stack for verse blocks. Empty means use the body font stack. |
+| `verse_font_size_delta_pt` | Verse font size relative to body text. Negative values make poems slightly smaller. |
 
 For long narrative verse, try:
 

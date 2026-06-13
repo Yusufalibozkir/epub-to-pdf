@@ -1,0 +1,262 @@
+Code Review: EPUB-to-PDF Pipeline
+====================================
+Reviewed: 2026-06-12
+
+This is an impressive project — a DAG-based, content-addressed, auto-fixing pipeline
+with plugin support and multi-provider AI integration. The architecture is sound and
+well-factored. Below are the findings organized by severity, with file:line references.
+
+
+🔴 HIGH — Likely Bugs
+---------------------
+
+1. Drop-cap regex matches HTML, not text content
+   File: pipeline/_cleaners.py, lines 1226-1235
+
+   new_html = _re.sub(r"\b(" + _re.escape(first_char) + r")", ...)
+
+   The regex is applied to str(node) — the HTML string, not the text content. If the
+   paragraph contains <span class="A">, the \b(A) word-boundary could match the 'A' in
+   an attribute value before the actual first letter of the paragraph text. This should
+   use a BeautifulSoup text-node replacement instead of operating on the serialized HTML.
+
+2. Mojibake/corrupted Unicode in dialog detection
+   File: pipeline/_cleaners.py, lines 440-441
+
+   if re.search(r"^[\"'â€œâ€˜].{8,}", text):
+
+   Those â€œâ€˜ literals are UTF-8 bytes (0xE2 0x80 0x9C for U+201C LEFT DOUBLE
+   QUOTATION MARK, etc.) being decoded as Latin-1. This pattern would never match
+   properly encoded Unicode curly quotes, and only accidentally matches if the EPUB
+   source itself has the same byte corruption. Should use “ and ‘ escapes
+   (which the related patterns on lines 441-443 already do correctly).
+
+3. "line" in class-keep regex is overbroad
+   File: pipeline/_cleaners.py, lines 51-56
+
+   r"poem|poetry|verse|stanza|line|cast|character|stage|note|footnote|endnote|chapter|title"
+
+   The substring "line" matches classes like "underline", "headline", "timeline",
+   "guideline", "decline", "outline" — none of which are verse-related. This silently
+   keeps many classes that should be stripped. Consider using word-boundary anchors
+   (\bline\b) or a more specific alternation.
+
+4. Greedy JSON extraction breaks on nested objects
+   File: pipeline/_ai.py, lines 71-76
+
+   m = re.search(r"\{.*\}", text, re.S)
+
+   .* with re.S matches from the first { to the LAST } in the entire text. For AI
+   responses containing nested JSON, this captures everything between the outermost
+   braces — potentially including trailing content. Should use balanced-brace tracking
+   or a dedicated parser (json.loads on progressively truncated input, or
+   regex-based brace-depth counter).
+
+
+🟠 MEDIUM — Architectural & Maintainability
+-------------------------------------------
+
+5. preflight_pdf is a 320-line monolith
+   File: pipeline/_render.py, lines 546-864
+
+   Performs ~15 distinct checks: page-size, fonts, line-spills, header-clearance,
+   narrow-columns, work-descriptions, orphans, widows, stranded-headings,
+   blank-page-artifacts, title-only-pages, duplicate-titles, opener-pages, TOC-checks,
+   folio-checks, dark-page-detection — all in one function. Factor each major check
+   into its own function with clear inputs/outputs and separate test coverage.
+
+6. PipelineContext is an untyped string-keyed bag
+   File: pipeline/_dag.py, lines 51-65
+
+   data: dict[str, Any] = field(default_factory=dict)
+   Access pattern: ctx.data.get("_docs_hash", ""), ctx.data["fragments"]
+
+   No type safety on keys. A typo (e.g., "_docs_hasH" vs "_docs_hash") silently
+   returns the default. Consider a typed dataclass with explicit fields for each
+   output, or at minimum a module-level constant for each magic key name.
+
+7. Operational log messages pollute QA warnings
+   File: pipeline/_dag.py, line 171; pipeline/_pipeline.py, line 171 (style)
+   Method: log.warn()
+
+   log.warn(f"[DAG]  CACHED {name}  (from cache)")
+   log.warn(f"[DAG]  RUNNING {name}{log_desc}")
+
+   These appear in the QA report's 'warnings' list alongside real quality issues
+   like header collisions. Add a separate diagnostic channel (e.g., log.diag() or
+   an optional verbosity level) so internal DAG messages don't mix with user-facing
+   quality warnings.
+
+8. BeautifulSoup round-trip for small-caps replacement is fragile
+   File: pipeline/_cleaners.py, lines 1280-1285
+
+   new_soup = BeautifulSoup(f"<span>{new_text}</span>", "lxml")
+   replacement = new_soup.span.extract()
+   node.replace_with(replacement)
+
+   Serializing a text node to HTML-like markup and re-parsing it can change
+   whitespace, entity encoding, or be misinterpreted. Better: use BeautifulSoup's
+   new_tag() + append() to create the <span> directly and split the NavigableString.
+
+9. has_blockers is too aggressive
+   File: pipeline/_models.py, lines 316-333
+
+   @property
+   def has_blockers(self) -> bool:
+       return bool(
+           ...
+           or self.possible_orphan_pages
+           or self.possible_widow_lines
+       )
+
+   possible_orphan_pages and possible_widow_lines are heuristic detections with
+   many false positives, yet they count as delivery blockers. Consider a severity
+   level system (info/warning/blocker) or a minimum count threshold.
+
+10. Document fragment parsed 2-3 times per document
+    File: pipeline/_pipeline.py, lines 398-417
+
+    After clean_document() returns a string:
+    1. Re-parsed for plugin cleaners
+    2. Re-parsed for fragment_is_title_only()
+    3. Re-parsed for visible_word_count()
+
+    For a 2000-document book this is wasteful. Pass the parsed soup through the
+    chain, or use len(text.split()) for word counts instead of re-parsing.
+
+11. Magic numbers and hardcoded thresholds throughout
+    Selected examples:
+
+    pipeline/_cleaners.py, lines 95-118:
+      2800 (promo block length), 360 (promo line length), 700 (plate shell),
+      140 (link line), 240 (cast entry), 220 (context truncation)
+    pipeline/_cleaners.py, lines 436-446:
+      14 words (short caption), 22 words (prose detection)
+    pipeline/_cleaners.py, lines 968-969:
+      18-260 words (work description length limits)
+    pipeline/_ai.py, line 162:
+      0.86 confidence threshold for AI document removal
+    pipeline/_ai.py, lines 306-307:
+      0.70 confidence threshold for AI image decision override
+    pipeline/_render.py, line 798:
+      45 (pixel average threshold for dark page detection)
+
+    None are configurable or documented. Consider collecting thresholds in
+    _constants.py or Settings with documentation on what each controls.
+
+
+🟡 LOW — Code Quality & Style
+-----------------------------
+
+12. queue.pop(0) is O(n)
+    File: pipeline/_dag.py, line 113
+
+    node = queue.pop(0)
+
+    Python lists shift all remaining elements on pop(0), making this O(n) per
+    iteration. Use collections.deque.popleft() for O(1). Minor for 12 stages,
+    but sets a poor pattern for any future reader.
+
+13. Imports at function level
+    Multiple locations:
+
+    pipeline/_cleaners.py, line 1542 — inside clean_document():
+      import html as html_module
+
+    pipeline/_pipeline.py, line 321 — inside _run_clean_documents():
+      from bs4 import BeautifulSoup as _BS
+
+    pipeline/_pipeline.py, line 539 — inside _run_ai_text_qa():
+      import fitz
+
+    Move these to module top-level. The _BS import is especially curious since
+    BeautifulSoup is already imported in _cleaners.py which this calls.
+
+14. import re as _re inside a function
+    File: pipeline/_cleaners.py, line 1229
+
+    import re as _re  # inside mark_drop_caps()
+
+    're' is already imported at the top of the module. The rename is unnecessary.
+
+15. Duplicate AI client initialization
+    File: pipeline/_ai.py, lines 31-57
+
+    require_openai_client() and require_deepseek_client() are ~90% identical.
+    Factor to a shared function:
+
+    def require_ai_client(provider: str):
+        key_var = f"{provider.upper()}_API_KEY"
+        if not os.environ.get(key_var):
+            raise SystemExit(f"{key_var} is not set.")
+        return OpenAI(api_key=os.environ[key_var],
+                      base_url=API_BASE_URLS.get(provider))
+
+16. optimize_pdf silently returns on import failure
+    File: pipeline/_render.py, lines 44-58
+
+    try:
+        import pikepdf
+    except Exception:
+        return  # <-- no warning to the user
+
+    If pikepdf isn't installed, the PDF is left unoptimized with no indication.
+    Add a log.warn or fall through to a user-visible message.
+
+17. draw_vector_runner_rules silently skips for non-matching config
+    File: pipeline/_render.py, lines 140-177
+
+    if settings.runner_layout.strip().lower() != "right_title_full_rule": return
+    if settings.runner_rule_style.strip().lower() != "full_width": return
+
+    If a user configures a runner layout/rule style that doesn't match, no rules
+    are drawn and no message is produced. Add a debug-level log or at least a
+    comment so users troubleshooting missing rules know it was intentional, not
+    a silent failure.
+
+18. Missing type annotations on internal helpers
+    Several helper functions lack return-type annotations:
+
+    pipeline/_cleaners.py: _looks_like_promotional_text (line 94)
+    pipeline/_cleaners.py: _block_text_lines (line 217)
+    pipeline/_cleaners.py: _img_context (line 254)
+    pipeline/_cleaners.py: _looks_like_compact_local_contents (line 221)
+    pipeline/_cleaners.py: _looks_like_real_prose_or_dialogue (line 436)
+    pipeline/_render.py: _looks_like_editorial_description_line (line 352)
+    pipeline/_render.py: parse_hex_color returns tuple[float,float,float]
+                           (line 83, has annotation but no named type)
+
+
+✅ What's Done Well (highlights)
+--------------------------------
+
+- DAG-based architecture with content-addressed caching is professional-grade.
+  The PipelineDAG + PipelineCache pairing is clean and effective.
+
+- Per-document caching for the expensive clean_document phase is a smart
+  optimization that handles the most common re-run scenario (edit one document's
+  rules -> only re-process that doc).
+
+- Three-layer config (defaults -> config file -> CLI) with Settings as the
+  source of truth is well-designed and properly implemented.
+
+- Auto-fix engine cycling through CSS adjustments based on QA feedback is
+  innovative and practical — "self-healing" typesetting.
+
+- Plugin system with hooks at every pipeline stage is cleanly architected
+  and genuinely extensible.
+
+- YAML rule pack system extending regex patterns at runtime (no Python code
+  required) is elegantly simple.
+
+- QA breadth is remarkable: 15+ distinct checks plus two AI QA passes.
+  Most production pipelines have fewer.
+
+- The regex pattern registry (_PATTERN_DICT + _register/update_pattern) is
+  a well-thought-out extensibility mechanism.
+
+- AI integration is conservative: high confidence thresholds, sensible
+  heuristic fallbacks, and clear audit logging of all AI decisions.
+
+- The BuildLog audit trail is comprehensive and well-organized — every
+  removal, decision, and auto-fix is tracked.

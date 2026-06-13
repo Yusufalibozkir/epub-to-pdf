@@ -68,11 +68,18 @@ def extract_json(text: str) -> dict[str, Any]:
         text = re.sub(r"\s*```$", "", text)
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.S)
-        if not m:
-            raise
-        return json.loads(m.group(0))
+    except json.JSONDecodeError as original_exc:
+        decoder = json.JSONDecoder()
+        for idx, ch in enumerate(text):
+            if ch != "{":
+                continue
+            try:
+                obj, _ = decoder.raw_decode(text[idx:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict):
+                return obj
+        raise original_exc
 
 
 def openai_json(

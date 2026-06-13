@@ -13,6 +13,12 @@ from pipeline._models import Settings, TocEntry
 from pipeline._utils import clean_display_title, clean_text, normalized_title_key
 
 
+SOURCE_TOC_TITLE_RE = re.compile(
+    r"^(?:the\s+)?principal\s+contents\.?$|^series\s+contents$|^alphabetical\s+list\s+of\s+titles$",
+    re.I,
+)
+
+
 def build_toc(
     toc: list[TocEntry],
     settings: Optional[Settings] = None,
@@ -36,6 +42,8 @@ def build_toc(
             continue
         key = normalized_title_key(title)
         if not key:
+            continue
+        if SOURCE_TOC_TITLE_RE.fullmatch(title.strip()):
             continue
         duplicate_counts[key] = duplicate_counts.get(key, 0) + 1
 
@@ -87,6 +95,8 @@ def css_text(settings: Settings, font_face_css: str = "") -> str:
     runner_rule_style = settings.runner_rule_style.strip().lower()
     body_top_mm = settings.margin_top_mm + max(0.0, settings.runner_body_clearance_mm)
     work_description_font_pt = max(6.0, settings.body_size_pt + settings.work_description_font_delta_pt)
+    verse_font_stack = settings.verse_font_stack.strip() or settings.font_stack
+    verse_font_pt = max(6.0, settings.body_size_pt + settings.verse_font_size_delta_pt)
 
     ligature = settings.ligature_setting.strip().lower()
     if ligature == "none":
@@ -279,22 +289,39 @@ body {{ margin: 0; }}
 .body-page-reset {{ counter-reset: bodyPage 0; height: 0; line-height: 0; font-size: 0; page: body; }}
 .epub-doc.starts-major-work {{ break-before: auto; }}
 .epub-doc.starts-chapter-opener {{ break-before: auto; }}
+.epub-doc.doc-frontmatter {{ page: front; break-before: page; }}
 .true-blank {{ page: nofolio; break-before: page; break-after: page; height: 0; }}
 h1, h2, h3, h4, h5, h6 {{ font-weight: 400; orphans: 2; widows: 2; hyphens: none; break-after: avoid-page; }}
-h1.major-work, h2.major-work, h1.collection-division, h1.backmatter-opener {{
+h1.major-work, h2.major-work, h1.collection-division, h1.backmatter-opener, h2.backmatter-opener {{
   page: opener; break-before: page; break-after: page; string-set: current-work content();
   margin: {settings.major_opener_top_margin_mm}mm 0 {settings.major_opener_bottom_margin_mm}mm; text-align: center; font-size: {settings.major_work_font_pt}pt; line-height: 1.08; letter-spacing: .04em; text-transform: uppercase;
+}}
+h1.frontmatter-opener, h2.frontmatter-opener {{
+  break-before: page; page-break-before: always; break-after: avoid-page; page-break-after: avoid;
+  margin: 20mm 0 9mm; text-align: center; font-size: {settings.subdivision_font_pt}pt; line-height: 1.12; letter-spacing: .04em; text-transform: uppercase; string-set: current-work content();
+}}
+/* Extra breathing room between a work title and its note/description. */
+h1.major-work + p.work-description,
+h2.major-work + p.work-description,
+h1.major-work + p.author-note,
+h2.major-work + p.author-note,
+h2.subdivision + p.author-note {{
+  margin-top: {settings.major_work_description_gap_mm}mm;
 }}
 .epub-doc.starts-major-work > h1.major-work,
 .epub-doc.starts-major-work > h2.major-work,
 .epub-doc.starts-major-work > h1.collection-division,
-.epub-doc.starts-major-work > h1.backmatter-opener {{ break-before: page; }}
+.epub-doc.starts-major-work > h1.backmatter-opener,
+.epub-doc.starts-major-work > h2.backmatter-opener,
+.epub-doc.starts-major-work > h1.frontmatter-opener,
+.epub-doc.starts-major-work > h2.frontmatter-opener {{ break-before: page; }}
 h1.collection-division {{ font-size: {settings.collection_division_font_pt}pt; letter-spacing: .07em; }}
 h2.subdivision {{
   break-after: avoid-page; page-break-after: avoid; orphans: 2; widows: 2; margin: {settings.subdivision_margin_top_mm}mm 0 {settings.subdivision_margin_bottom_mm}mm; text-align: center; font-size: {settings.subdivision_font_pt}pt; letter-spacing: .035em; text-transform: uppercase;
 }}
 h2.part-heading {{
-  margin: 0 0 {settings.part_heading_margin_bottom_mm}mm; font-size: {settings.part_heading_font_pt}pt; letter-spacing: .035em;
+  break-before: page; page-break-before: always; break-after: avoid-page; page-break-after: avoid;
+  margin: 18mm 0 {settings.part_heading_margin_bottom_mm}mm; font-size: {settings.part_heading_font_pt}pt; letter-spacing: .035em; text-align: center; text-transform: uppercase;
 }}
 h2.part-heading + h2.subdivision {{
   margin-top: 0;
@@ -305,6 +332,10 @@ h2.chapter-section-heading {{
 h2.subdivision + h2.chapter-section-heading {{
   margin-top: {settings.chapter_section_margin_top_mm}mm;
 }}
+.epub-doc.starts-chapter-opener > h2.subdivision:first-child,
+.epub-doc.starts-chapter-opener > h2.chapter-section-heading:first-child {{
+  break-before: page; page-break-before: always; break-after: avoid-page; page-break-after: avoid;
+}}
 h2.subdivision + p, h2.chapter-section-heading + p {{ break-before: avoid-page; }}
 h1 + p, h2 + p, h3 + p, h4 + p, h5 + p, h6 + p {{ break-before: avoid-page; widows: 5; orphans: 2; }}
 h2.act-opening, h2.act-scene-heading, h3.act-scene-heading {{ break-before: page; margin: 22mm 0 7mm; text-align: center; font-size: 14pt; letter-spacing: .06em; text-transform: uppercase; }}
@@ -313,13 +344,22 @@ h4, h5, h6, .minor-heading {{ margin: 6mm 0 3mm; text-align: center; font-size: 
 p {{ margin: 0; text-align: {prose_align}; text-indent: {settings.paragraph_indent_em}em; widows: 2; orphans: 2; }}
 h1 + p, h2 + p, h3 + p, h4 + p, .no-indent, blockquote p:first-child, .stage-direction, .cast-list p {{ text-indent: 0; }}
 p.work-description {{
-  font-size: {work_description_font_pt}pt; font-style: italic; text-indent: 0; margin: 0 0 {settings.work_description_bottom_margin_mm}mm 0;
+  font-size: {work_description_font_pt}pt; font-style: italic; text-indent: 0; margin: 0;
+}}
+p.work-description.work-description-end {{
+  margin-bottom: {settings.work_description_bottom_margin_mm}mm;
+}}
+p.source-title-page-title {{
+  font-style: normal; text-indent: 0; margin: 0;
+}}
+p.author-note {{
+  font-size: {settings.body_size_pt}pt; font-style: italic; text-indent: 0; margin: 0 0 {settings.author_note_bottom_margin_mm}mm 0;
 }}
 p + p {{ margin-top: 0; }}
 blockquote {{ margin: 4mm {settings.blockquote_side_margin_mm}mm; font-size: {settings.blockquote_font_percent}%; }}
 hr {{ border: 0; border-top: .45pt solid #888; margin: 9mm auto; width: 35%; }}
 .verse-block {{
-  margin: {settings.verse_block_margin_top_mm}mm auto {settings.verse_block_margin_bottom_mm}mm; max-width: {settings.verse_max_width_mm}mm; line-height: {settings.verse_line_height}; text-align: left !important; text-indent: 0 !important; hyphens: none;
+  margin: {settings.verse_block_margin_top_mm}mm auto {settings.verse_block_margin_bottom_mm}mm; max-width: {settings.verse_max_width_mm}mm; font-family: {verse_font_stack}; font-size: {verse_font_pt}pt; line-height: {settings.verse_line_height}; text-align: left !important; text-indent: 0 !important; hyphens: none;
   break-inside: auto;
 }}
 .verse-line {{ display: block; text-indent: -{settings.verse_hanging_indent_em}em; padding-left: {settings.verse_hanging_indent_em}em; white-space: pre-wrap; }}
@@ -357,10 +397,16 @@ body, main, section, article, div {{ max-width: none; }}
 .drop-cap {{
   float: left;
   font-size: 3em;
-  line-height: 0.85;
-  margin: 0.08em 0.12em 0 0;
+  line-height: 1.0;
+  margin: 0.02em 0.12em 0 0;
   font-weight: 400;
   text-indent: 0;
+}}
+/* Contain the drop-cap float so it doesn't leak into subsequent paragraphs. */
+.drop-cap-paragraph::after {{
+  content: "";
+  display: table;
+  clear: both;
 }}
 /* Small caps */
 .small-caps {{
@@ -368,14 +414,14 @@ body, main, section, article, div {{ max-width: none; }}
   letter-spacing: 0.03em;
   text-transform: lowercase;
 }}
-/* Footnotes: restructured inline footnote bodies rendered as page-bottom notes */
+/* Footnotes: malformed inline note clusters are stabilized as endnote-style blocks. */
 .footnotes {{
   page: body;
   font-size: 9pt;
   line-height: 1.25;
+  margin: 4mm 0 5mm;
 }}
 .footnotes .footnote {{
-  float: footnote;
   font-size: 9pt;
   line-height: 1.25;
   text-indent: 0;
@@ -411,7 +457,15 @@ def compose_html(
 ) -> tuple[str, str]:
     """Assemble the complete HTML document and its accompanying CSS."""
     toc_html = build_toc(toc, settings, toc_page_numbers)
-    body = "\n".join(fragments)
+    frontmatter_fragments: list[str] = []
+    body_fragments: list[str] = []
+    for frag in fragments:
+        if re.search(r'<section[^>]+class="[^"]*\bdoc-frontmatter\b', frag):
+            frontmatter_fragments.append(frag)
+        else:
+            body_fragments.append(frag)
+    frontmatter_body = "\n".join(frontmatter_fragments)
+    body = "\n".join(body_fragments)
     subtitle_html = (
         f'<div class="subtitle">{html.escape(settings.title_page_subtitle)}</div>'
         if clean_text(settings.title_page_subtitle)
@@ -455,6 +509,7 @@ def compose_html(
 {title_page_html}
 {source_html}
 <section class="frontmatter toc-page"><h1>Contents</h1>{toc_html}</section>
+{frontmatter_body}
 <main class="main">
 {body}
 </main>
