@@ -1,0 +1,95 @@
+# Deluxe EPUB-to-print-PDF pipeline config
+# Missing keys keep the built-in defaults. You can delete anything you do not want to override.
+# Override order: built-in defaults -> this config file -> explicit CLI flags.
+
+title: ""
+trim_size: "A5"
+body_size_pt: 10.4
+line_height: 1.2
+font_stack: "\"EB Garamond\", \"Cormorant Garamond\", Garamond, Georgia, serif"
+embed_font_files: true
+font_dir: "fonts"
+embedded_font_family: "EB Garamond"
+embedded_font_regular: "EBGaramond-wght.ttf"
+embedded_font_italic: "EBGaramond-Italic-wght.ttf"
+embedded_font_weight: "400 800"
+text_color: "#111"
+body_font_weight: "400"
+hyphenate: true
+justify_prose: true
+margin_top_mm: 13.0
+margin_side_mm: 15.0
+margin_bottom_mm: 16.0
+front_margin_top_mm: 18.0
+front_margin_bottom_mm: 16.0
+runner_font_pt: 7.8
+runner_left_font_pt: null
+runner_right_font_pt: null
+runner_letter_spacing_em: 0.035
+runner_rule_gap_mm: 2.4
+runner_body_clearance_mm: 5.0
+runner_rule_y_mm: 12.5
+runner_title_top_mm: 6.0
+runner_rule_weight_pt: 0.4
+runner_rule_color: "#222"
+runner_layout: "right_title_full_rule"
+runner_rule_style: "full_width"
+runner_collection_transform: "uppercase"
+runner_work_transform: "none"
+folio_font_pt: 8.8
+front_folio_font_pt: 8.2
+paragraph_indent_em: 1.15
+blockquote_side_margin_mm: 6.0
+blockquote_font_percent: 94.0
+major_opener_top_margin_mm: 38.0
+major_opener_bottom_margin_mm: 12.0
+major_work_description_gap_mm: 3.5
+major_work_font_pt: 17.5
+collection_division_font_pt: 18.0
+work_description_font_delta_pt: -1.0
+work_description_bottom_margin_mm: 5.0
+author_note_bottom_margin_mm: 6.0
+part_heading_font_pt: 10.4
+part_heading_margin_bottom_mm: 4.5
+chapter_section_font_pt: 10.4
+chapter_section_margin_top_mm: 4.0
+chapter_section_margin_bottom_mm: 2.4
+subdivision_font_pt: 11.0
+subdivision_margin_top_mm: 5.0
+subdivision_margin_bottom_mm: 3.5
+h3_font_pt: 11.6
+minor_heading_font_pt: 10.2
+toc_title_font_pt: 16.0
+toc_level_1_font_pt: 9.8
+toc_level_2_font_pt: 9.2
+toc_level_3_font_pt: 8.8
+toc_level_4_font_pt: 8.5
+toc_line_height: 1.08
+toc_entry_gap_mm: 2.0
+verse_max_width_mm: 100.0
+verse_line_height: 1.12
+verse_hanging_indent_em: 1.2
+verse_block_margin_top_mm: 3.0
+verse_block_margin_bottom_mm: 3.5
+verse_font_stack: ""
+verse_font_size_delta_pt: -0.4
+cast_max_width_mm: 102.0
+cast_line_height: 1.12
+image_policy: "functional"
+smart_punctuation: true
+rule_pack_dir: "rules"
+rule_packs: "generic_epub.yaml"
+write_ai_rule_suggestions: true
+include_half_title_page: false
+include_title_page: true
+half_title_page_font_pt: 17.0
+title_page_font_pt: 23.0
+title_page_collection_font_pt: 16.0
+title_page_of_font_pt: 11.0
+title_page_subtitle: ""
+include_source_note: false
+source_note_text: "Prepared as a single-page A5 print interior from the supplied EPUB source."
+major_opener_blank_before: true
+major_opener_blank_after: true
+strict: false
+no_sample_requirement: false

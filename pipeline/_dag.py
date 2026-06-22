@@ -15,6 +15,7 @@ from __future__ import annotations
 import enum
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -106,11 +107,11 @@ class PipelineDAG:
                 adjacency[dep].append(name)
                 in_degree[name] += 1
 
-        queue = [n for n, d in in_degree.items() if d == 0]
+        queue = deque(n for n, d in in_degree.items() if d == 0)
         order = []
 
         while queue:
-            node = queue.pop(0)
+            node = queue.popleft()
             order.append(node)
             for neighbor in adjacency[node]:
                 in_degree[neighbor] -= 1

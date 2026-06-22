@@ -5,6 +5,14 @@ Typical sample command
 ----------------------
 .\.venv\Scripts\python.exe deluxe_epub_to_pdf.py "book.epub" --config "my_style.yaml" --out "sample.pdf" --sample-pages 50 --debug-html
 
+Typical section-preview command
+-------------------------------
+.\.venv\Scripts\python.exe deluxe_epub_to_pdf.py "book.epub" --config "my_style.yaml" --section "The Biographies" --out "biographies-preview.pdf" --sample-pages 20 --debug-html
+
+Typical batch command
+---------------------
+.\.venv\Scripts\python.exe deluxe_epub_to_pdf.py --batch "books" --config "my_style.yaml" --out output --batch-title-source filename --sample-pages 50 --skip-existing
+
 Typical DeepSeek command (text QA + rule suggestions)
 -----------------------------------------------------
 $env:DEEPSEEK_API_KEY="your-key"
@@ -26,16 +34,21 @@ epub
   Input EPUB path. Required unless using --write-default-config.
 
 --out
-  Output PDF filename/path. Bare filenames go under --output-dir. Default: print_ready.pdf.
+  Output PDF filename/path. Bare filenames go under --output-dir in single-book mode. Default: print_ready.pdf.
+  In batch mode, a folder-like --out value can be used as the batch output folder.
 
 --output-dir
-  Folder for PDFs when --out is a bare filename. Default: output.
+  Folder for PDFs when --out is a bare filename in single-book mode, or the explicit batch output folder.
+  Default: output.
 
 --artifacts-dir
   Folder for QA reports, rendered QA pages, debug builds, and cache. Default: artifacts.
 
 --title
   Optional clean title override. Omit normally; EPUB metadata is used automatically.
+
+--author
+  Optional author override used for runner fallback and title-page metadata. Omit normally; EPUB metadata is used automatically.
 
 --config
   YAML or JSON config file. Example: --config "my_style.yaml".
@@ -44,10 +57,61 @@ epub
   Write a complete editable default config and exit.
 
 
+Batch conversion
+----------------
+--batch
+  Convert all EPUB files in a folder. Requires a directory path.
+
+--recursive
+  Include EPUBs in subfolders when using --batch.
+
+--batch-glob
+  File pattern to match when discovering EPUBs in --batch mode. Default: *.epub.
+
+--skip-existing
+  Skip a book when the target PDF already exists.
+
+--on-error
+  Batch error behavior. Choices: continue, stop. Default: continue.
+
+--batch-title-source
+  Batch title source. Choices: metadata, filename. Default: metadata.
+  metadata keeps EPUB metadata titles. filename uses the filename stem as the visible title.
+  Batch mode does not allow --title, because each EPUB gets its own title source.
+
+--volume-mode
+  Book-structure override. Choices: auto, single, collection. Default: auto.
+  auto uses title/metadata heuristics.
+  single forces standalone-book runner logic.
+  collection forces collected/complete-works runner logic.
+  This also applies to every EPUB in --batch mode.
+
+
+Table of contents
+-----------------
+--toc-mode
+  TOC mode. Choices: auto, simple, hierarchical. Default: auto.
+  simple keeps only the top-level TOC entries.
+  hierarchical keeps nesting with lighter indentation.
+  auto prompts once in an interactive shell and defaults to simple when non-interactive.
+
+--back-toc-mode
+  Optional back-of-book TOC mode. Choices: off, simple, hierarchical. Default: off.
+  This appends a second generated TOC at the end of the PDF without changing the front TOC.
+  Example: --toc-mode simple --back-toc-mode hierarchical
+
+
 Sampling and build intent
 -------------------------
 --sample-pages
   Build only the first N PDF pages for review. Recommended before full builds.
+
+--section
+  Render only the named logical section for faster testing, after the pipeline
+  still scans/classifies the full EPUB first.
+  Current matching targets are classified division, major-work, and backmatter titles.
+  Example: --section "The Biographies"
+  The generated title page and a subset-scoped TOC are still included by default.
 
 --full-without-sample
   Intentionally build the full book without sample-first warning.
@@ -103,6 +167,12 @@ Running heads and folios
 --runner-font
   Running-head font size in pt. Config key: runner_font_pt.
 
+--runner-left-font
+  Optional verso running-head font size in pt. Falls back to --runner-font when omitted.
+
+--runner-right-font
+  Optional recto running-head font size in pt. Falls back to --runner-font when omitted.
+
 --folio-font
   Page-number/folio font size in pt. Config key: folio_font_pt.
 
@@ -126,10 +196,10 @@ Running heads and folios
   Config key: runner_rule_style.
 
 --runner-collection-transform
-  CSS text-transform for collection title runner, e.g. none or uppercase.
+  CSS text-transform for collection title runner, e.g. uppercase or none.
 
 --runner-work-transform
-  CSS text-transform for current-work runner, e.g. uppercase or none.
+  CSS text-transform for current-work runner, e.g. none or uppercase.
 
 
 Paragraphs, headings, verse
@@ -183,6 +253,10 @@ part_heading_font_pt / part_heading_margin_bottom_mm
 
 chapter_section_font_pt / chapter_section_margin_top_mm / chapter_section_margin_bottom_mm
   Compact section labels such as "INTRODUCTION" below "CHAPTER I".
+
+trim_size
+  Configured page trim size. Default: A4. Common values: A4, A5, Letter, Legal, or a custom size string.
+  Preflight QA checks page dimensions against this configured trim size.
 
 
 Images and cleanup

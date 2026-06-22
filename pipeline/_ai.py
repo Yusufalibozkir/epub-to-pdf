@@ -18,7 +18,7 @@ from typing import Any, Optional
 
 from pipeline import _constants as C
 from pipeline._models import BuildLog, QAVerdict, Settings, SpineDoc
-from pipeline._render import render_selected_pages
+from pipeline._render import expected_trim_size_points, render_selected_pages
 from pipeline._rule_packs import extract_review_rule_suggestions, write_review_rule_suggestions
 from pipeline._utils import clean_text
 
@@ -205,14 +205,26 @@ def ai_image_decision(
 
 
 def openai_visual_qa(
-    client, model: str, pdf_path: Path, qa_json: Path, qa_dir: Path, max_pages: int
+    client,
+    model: str,
+    pdf_path: Path,
+    qa_json: Path,
+    qa_dir: Path,
+    max_pages: int,
+    settings: Optional[Settings] = None,
 ) -> Path:
     images = render_selected_pages(pdf_path, qa_dir, prefix="openai_page", max_pages=max_pages, jpg=True)
     report_excerpt = (
         qa_json.read_text(encoding="utf-8", errors="ignore")[:12000] if qa_json.exists() else ""
     )
+    expected_width_pt, expected_height_pt, expected_trim_label = expected_trim_size_points(settings)
     prompt = (
-        "Review these rendered pages from an A4 deluxe print-book PDF as a strict book-production QA inspector.\n\n"
+        "Review these rendered pages from a deluxe print-book PDF as a strict book-production QA inspector.\n"
+        f"Expected trim from the active config: {expected_trim_label} "
+        f"({expected_width_pt:.2f} x {expected_height_pt:.2f} pt). "
+        "Judge page size and geometry against that configured trim, not against A4 unless the trim is A4. "
+        "If the local QA JSON contains a field named non_a4_pages, treat it as a legacy field meaning "
+        "'pages not matching the configured trim.'\n\n"
         "Check all of these prompt requirements:\n"
         "1. Body typography: prose paragraphs should be fully justified, not ragged-right, except legitimate poetry, "
         "drama, TOC, headings, captions, and front matter. Watch for loose rivers, bad word spacing, broken words, "
@@ -293,6 +305,8 @@ def ai_text_issue_lines(report_text: str) -> list[str]:
     issue_terms = re.compile(
         r"\b(FAIL|ISSUE|problem|warning|duplicate|missing|wrong|residue|artifact|"
         r"promo|publisher|caption|image|TOC|contents|chapter|heading|folio|page number|"
+        r"publisher-apparatus|vendor|boilerplate|catalogue|catalog|delphi classics|"
+        r"project gutenberg|gutenberg|subscribe|newsletter|ISBN|eBook|delphiclassics|"
         r"ragged|unjustified|not justified|line spill|single-letter|blank|empty|raw ebook|"
         r"blue|underlined|hyperlink|poetry|verse|drama|cast|stage direction)\b",
         re.I,
@@ -424,7 +438,7 @@ def ai_text_qa(
         "AUTO_FIXABLE_SIGNALS:\n"
         "- Use these words only when visibly supported by extracted text/local QA: body-typography, "
         "chapter/title placement, TOC spacing/page-number, runner/header clearance, folio/page-numbering, "
-        "ebook artifact, image/caption cleanup, poetry/drama/special-form.\n"
+        "ebook artifact, publisher-apparatus, image/caption cleanup, poetry/drama/special-form.\n"
         "- For safe layout tuning, say ISSUE with one of those categories. For structural cleanup requiring "
         "regex rules, put the proposed pattern in REGEX_RULE_SUGGESTIONS.\n"
         "- Editorial work descriptions after a major work title or subtitle should be styled as smaller italic "
@@ -435,11 +449,30 @@ def ai_text_qa(
         "  - These typically appear right after a work title heading and before 'CHAPTER I' or similar.\n"
         "  - If you find one, flag it with category 'work-description-style' even if the local QA didn't.\n"
         "    Say: 'Page X: editorial work description for [Work Name] may not be italic/smaller.'\n"
+        "- Independently audit for publisher/vendor apparatus that should never appear in the final book body or TOC. "
+        "Flag category 'publisher-apparatus' if extracted text, TOC text, removed-log gaps, or local QA suggest surviving "
+        "Project Gutenberg boilerplate/license text, Delphi Classics material, publisher catalogues/catalogs, copyright/vendor "
+        "pages, sales blurbs such as 'Interested in...', 'comprehensive editions', 'bonus texts', 'Explore our wide range', "
+        "social-media links, store links, ISBN/app/eBook marketing, newsletter/subscribe prompts, or web URLs such as "
+        "delphiclassics.com. Do not flag ordinary authorial uses of words like 'catalogue' or the ancient place 'Delphi' "
+        "inside the literary/philosophical text unless it is clearly publisher/vendor apparatus.\n"
+        "- Treat frontmatter clutter as blocker-class when supported by extracted text/local QA: generated pages saying "
+        "'No reliable table of contents could be inferred', TOCs with only one trivial entry, duplicate title-only pages, "
+        "body pages that contain only a runner/title/folio, source mini-contents made of roman numerals, and Project "
+        "Gutenberg START/END markers, and transcriber/source-production notes such as 'Transcriber's Note', "
+        "'Produced by', 'replicate this text', or 'non-standard spelling'. These should be reported as ISSUE even in short books.\n"
+        "- For REGEX_RULE_SUGGESTIONS, prefer stable publisher/source-layout markers such as Project Gutenberg START/END "
+        "lines, pg-header, Delphi catalogue phrases, or compact roman-numeral mini-contents. Do not propose broad "
+        "book-title-specific patterns as generic cleanup rules unless the pattern also contains a source-layout marker.\n"
         "REGEX_RULE_SUGGESTIONS:\n"
         "Provide a fenced yaml block named rule_suggestions using only these optional keys: "
         + ", ".join(C.RULE_PACK_KEYS)
         + ". Include only high-confidence patterns that would help future EPUB cleanup. Do not include broad "
         "patterns likely to remove real literature.\n\n"
+        f"Expected trim from the active config: {settings.trim_size}. "
+        "Judge page-size and layout expectations against this configured trim, not against A4 unless trim_size is A4. "
+        "If the local QA JSON contains a field named non_a4_pages, treat it as a legacy field meaning "
+        "'pages not matching the configured trim.'\n\n"
         "Current settings excerpt:\n" + json.dumps(dataclass_dict(settings), ensure_ascii=False)[:12000]
         + "\n\nLocal QA report:\n" + qa_report
         + "\n\nLocal QA verdict JSON:\n" + qa_verdict

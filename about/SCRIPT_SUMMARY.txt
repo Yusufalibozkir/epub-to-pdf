@@ -166,6 +166,9 @@ pipeline/_pipeline.py       -- Build orchestrator: build_once() executes a singl
       text sample, poetry/drama/image flags), runs heuristic_classify_doc().
     - heuristic_classify_doc(): deterministic classification using regex patterns.
     - Plugin hook: plugin classifiers run after heuristic classification.
+    - Section preview workflow: `--section "The Biographies"` still scans and
+      classifies the whole EPUB first, then selects a contiguous logical slice
+      (currently division / major-work / backmatter match) for faster testing.
 
 5.4. HTML Cleanup and Normalization (pipeline/_cleaners.py)
     ~20 transformation functions applied per document, with plugin cleaner hooks:
@@ -190,6 +193,14 @@ pipeline/_pipeline.py       -- Build orchestrator: build_once() executes a singl
     r) mark_major_work_descriptions()
     s) mark_standalone_work_description_fragment()
     t) insert_major_opener_separators()
+
+5.4.a Section-scoped test renders
+    - `--section TEXT` is a testing/debugging flag, not a post-render crop.
+    - Subsetting happens after full-book scan/classify, before document cleaning.
+    - The selected slice is cleaned/rendered with the normal pipeline, preserving
+      generated title page + subset-scoped TOC by default.
+    - Structural context such as current division/work may be seeded from prior
+      docs so runner heads and opener logic remain meaningful.
 
 5.5. CSS Generation (pipeline/_css.py)
     css_text() generates the complete print stylesheet driven by Settings values:

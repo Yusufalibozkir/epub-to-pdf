@@ -129,9 +129,37 @@ SOURCE_CONTENTS_HEADINGS_RE = re.compile(
     re.I,
 )
 
+WORK_BYLINE_ROLE_RE = re.compile(
+    r"\b(?:translated|edited|selected|arranged|compiled|abridged|introduced|with an introduction)\s+by\b",
+    re.I,
+)
+
+AUTHORED_WORK_OPENER_RE = re.compile(
+    r"^(?P<title>.+?)\s+by\s+(?P<author>[A-Z][A-Za-z .,'\u2019\u2018\u2014\u2013\u2010-]{2,80})$",
+    re.I,
+)
+
 
 def _is_source_contents_heading(text: str) -> bool:
     return SOURCE_CONTENTS_HEADINGS_RE.fullmatch(clean_text(text).strip()) is not None
+
+
+def _extract_authored_work_opener(text: str) -> Optional[tuple[str, str]]:
+    cleaned = clean_display_title(text)
+    if not cleaned or WORK_BYLINE_ROLE_RE.search(cleaned):
+        return None
+    match = AUTHORED_WORK_OPENER_RE.fullmatch(cleaned)
+    if not match:
+        return None
+    title = clean_display_title(match.group("title"))
+    author = clean_display_title(match.group("author"))
+    if not title or not author:
+        return None
+    if visible_word_count(title) > 10 or visible_word_count(author) > 8:
+        return None
+    if C.CHAPTER_HEADINGS.match(title) or C.FRONTMATTER_PATTERNS.match(title):
+        return None
+    return title, author
 
 
 def remove_source_contents_apparatus(soup: BeautifulSoup, log: BuildLog) -> None:
@@ -1041,8 +1069,10 @@ def normalize_headings(
     used_ids: set[str],
     current_work: Optional[str],
     current_division: Optional[str],
+    source_top_level_keys: Optional[set[str]] = None,
 ) -> tuple[Optional[str], Optional[str]]:
     """Classify each heading tag and assign the correct semantic class and TOC entry."""
+    source_top_level_keys = source_top_level_keys or set()
     doc_major_key = normalized_title_key(doc.major_title)
     doc_division_key = normalized_title_key(doc.current_division)
     for h in soup.find_all(re.compile(r"^h[1-6]$")):
@@ -1060,6 +1090,8 @@ def normalize_headings(
         h_classes = h.get("class", [])
         if isinstance(h_classes, str):
             h_classes = h_classes.split()
+        authored_work_opener = _extract_authored_work_opener(text)
+        is_source_top_level = text_key in source_top_level_keys
         is_chapter_section_heading = "chapter-section-heading" in h_classes
         is_division = (
             C.COLLECTION_DIVISIONS.match(text) is not None
@@ -1074,12 +1106,21 @@ def normalize_headings(
         is_backmatter = C.BACKMATTER_PATTERNS.match(text) is not None or doc.kind == "backmatter"
         is_frontmatter = C.FRONTMATTER_PATTERNS.match(text) is not None or doc.kind == "frontmatter"
         is_chapterish = C.CHAPTER_HEADINGS.match(text) is not None
+        in_embedded_subwork = bool(
+            current_division
+            and current_work
+            and normalized_title_key(current_division) != normalized_title_key(current_work)
+        )
         is_major = False
-        if level == 1 and not is_chapterish and not is_chapter_section_heading and not is_frontmatter:
+        if authored_work_opener is not None:
+            is_major = False
+        elif is_source_top_level and not is_chapterish and not is_frontmatter and not is_backmatter:
+            is_major = True
+        elif level == 1 and not is_chapterish and not is_chapter_section_heading and not is_frontmatter and not in_embedded_subwork:
             is_major = True
         if doc_major_key and doc_major_key == text_key and doc.kind in {"major_work", "play", "poetry", "backmatter"}:
             is_major = True
-        if level == 2 and current_division and not is_chapterish and not is_chapter_section_heading and len(text) < 90:
+        if level == 2 and current_division and not is_chapterish and not is_chapter_section_heading and len(text) < 90 and not in_embedded_subwork:
             is_major = True
         if is_division:
             current_division = text
@@ -1091,12 +1132,26 @@ def normalize_headings(
         elif is_frontmatter:
             current_work = text
             h["class"] = add_classes(h, ["frontmatter-opener", "formal-opener"])
+        elif authored_work_opener is not None:
+            title, author = authored_work_opener
+            current_work = title
+            h.name = "h1"
+            h["class"] = add_classes(h, ["subdivision", "story-work-opener", "embedded-authored-work"])
+            h.clear()
+            h.string = title
+            by_tag = soup.new_tag("p")
+            by_tag["class"] = ["author-note", "no-indent", "embedded-work-author"]
+            by_tag.string = "by " + author
+            h.insert_after(by_tag)
+            text = title
         elif is_major:
             current_work = text
+            if is_source_top_level:
+                current_division = None
             h["class"] = add_classes(h, ["major-work", "formal-opener"])
         elif is_chapter_section_heading:
             h["class"] = add_classes(h, ["chapter-section-heading"])
-        elif level == 2:
+        elif level == 2 or in_embedded_subwork:
             h["class"] = add_classes(h, ["subdivision"])
         else:
             h["class"] = add_classes(h, ["minor-heading"])
@@ -1108,18 +1163,23 @@ def normalize_headings(
         else:
             used_ids.add(str(ident))
         h["id"] = ident
+        source_level = 1 if is_source_top_level else 0
+        toc_title = text
+        if authored_work_opener is not None:
+            toc_title = f"{authored_work_opener[0]} by {authored_work_opener[1]}"
         if is_division:
-            toc.append(TocEntry(1, text, str(ident), "division"))
-        elif is_backmatter or is_major:
+            toc.append(TocEntry(1, toc_title, str(ident), "division", source_level))
+        elif is_backmatter or is_major or authored_work_opener is not None:
+            toc_level = 1 if is_source_top_level or not current_division else 2
             toc.append(
-                TocEntry(1 if not current_division else 2, text, str(ident), "backmatter" if is_backmatter else "work")
+                TocEntry(toc_level, toc_title, str(ident), "backmatter" if is_backmatter else "work", source_level)
             )
         elif is_frontmatter:
-            toc.append(TocEntry(1 if not current_division else 2, text, str(ident), "frontmatter"))
+            toc.append(TocEntry(1 if not current_division else 2, toc_title, str(ident), "frontmatter", source_level))
         elif is_chapterish and level == 2:
-            toc.append(TocEntry(2 if not current_division else 3, text, str(ident), "chapter"))
-        elif level == 2 and not is_chapterish and not is_chapter_section_heading and len(text) < 90:
-            toc.append(TocEntry(3 if current_division else 2, text, str(ident), "work"))
+            toc.append(TocEntry(2 if not current_division else 3, toc_title, str(ident), "chapter", source_level))
+        elif level == 2 and not is_chapterish and not is_chapter_section_heading and len(text) < 90 and not in_embedded_subwork:
+            toc.append(TocEntry(3 if current_division else 2, toc_title, str(ident), "work", source_level))
     return current_work, current_division
 
 
@@ -1588,6 +1648,27 @@ def _wrap_pattern_matches_in_text_node(
     return True
 
 
+def _looks_like_reference_list_paragraph(text: str) -> bool:
+    s = clean_text(text)
+    if not s:
+        return False
+    if visible_word_count(s) < 4:
+        return False
+    if re.match(r"^(english translations|biographical and expository)\b", s, re.I):
+        return True
+    if re.search(
+        r"\btranslated by\b|\bselected and translated\b|\bwith introduction\b|"
+        r"\bvols?\.?\b|\bed\.?\b|\blibrary\b|\bphilosophical library\b|"
+        r"\bencyclop[a-z]* britannica\b|\bprofessor\b|\bby [A-Z][A-Za-z .'-]{2,40}\b",
+        s,
+        re.I,
+    ):
+        year_hits = len(re.findall(r"\b(?:1[6789]\d{2}|20\d{2})\b", s))
+        if year_hits >= 1 or visible_word_count(s) <= 30:
+            return True
+    return False
+
+
 def mark_drop_caps(soup: BeautifulSoup, settings: Settings, log: BuildLog) -> None:
     """Wrap the first letter of the first paragraph after chapter headings.
 
@@ -1614,6 +1695,13 @@ def mark_drop_caps(soup: BeautifulSoup, settings: Settings, log: BuildLog) -> No
             if not text or text.startswith('"') or text.startswith("'") or text.startswith("\u201c"):
                 # Chapter opens with dialogue — don't drop-cap the *next* paragraph.
                 break
+            if visible_word_count(text) <= 12 and not re.search(r"[.!?][\"')\]]?$", text):
+                # Short prefatory lines like "From ..." should not receive a decorative drop cap.
+                node = node.next_sibling
+                continue
+            if _looks_like_reference_list_paragraph(text):
+                node = node.next_sibling
+                continue
             # Check it's not already a special class
             classes = " ".join(node.get("class", [])) if isinstance(node.get("class", []), list) else str(node.get("class", ""))
             if any(x in classes for x in ["work-description", "work-subtitle", "no-indent", "stage-direction", "cast-list"]):
@@ -1680,6 +1768,15 @@ def normalize_small_caps(soup: BeautifulSoup, settings: Settings, log: BuildLog)
 def fragment_is_title_only(frag: str, settings: Settings) -> bool:
     soup = BeautifulSoup(frag, "lxml")
     if soup.find(["img", "svg", "table"]):
+        return False
+    section = soup.find("section")
+    if section is not None:
+        section_classes = section.get("class", [])
+        if isinstance(section_classes, str):
+            section_classes = section_classes.split()
+        if "embedded-authored-work-fragment" in section_classes:
+            return False
+    if soup.find(class_=lambda c: c and "embedded-authored-work" in str(c).split()):
         return False
     text = clean_text(soup.get_text(" "))
     if not text:
@@ -1830,6 +1927,7 @@ def clean_document(
     ai_client=None,
     ai_model: str = "gpt-5.4-mini",
     ai_provider: str = "openai",
+    source_top_level_keys: Optional[set[str]] = None,
 ) -> tuple[str, Optional[str], Optional[str]]:
     """Apply the full cleanup pipeline to one EPUB spine document.
 
@@ -1866,7 +1964,15 @@ def clean_document(
     normalize_cast_and_drama(soup, log)
     promote_paragraph_headings(soup, log)
     current_work = add_synthetic_opener_if_needed(soup, doc, toc, used_ids, current_work)
-    current_work, current_division = normalize_headings(soup, doc, toc, used_ids, current_work, current_division)
+    current_work, current_division = normalize_headings(
+        soup,
+        doc,
+        toc,
+        used_ids,
+        current_work,
+        current_division,
+        source_top_level_keys=source_top_level_keys,
+    )
     current_work = ensure_frontmatter_opener(soup, doc, toc, used_ids, current_work)
     mark_major_work_descriptions(soup, log)
     mark_standalone_work_description_fragment(soup, current_work, doc, log)
@@ -1927,19 +2033,33 @@ def clean_document(
     if direct_content_tags:
         has_description = False
         all_description_fragment = True
+        has_embedded_authored_work = False
+        authored_fragment_only = True
         for child in direct_content_tags:
             child_classes = child.get("class", [])
             if isinstance(child_classes, str):
                 child_classes = child_classes.split()
+            if "embedded-authored-work" in child_classes:
+                has_embedded_authored_work = True
+                continue
+            if "embedded-work-author" in child_classes:
+                continue
             if "work-description" in child_classes:
                 has_description = True
                 continue
             if "source-title-page-title" in child_classes:
                 continue
             all_description_fragment = False
-            break
+            if child.name not in {"h1", "h2", "p"}:
+                authored_fragment_only = False
+            elif child.name == "p" and "author-note" not in child_classes:
+                authored_fragment_only = False
+            elif child.name in {"h1", "h2"} and "embedded-authored-work" not in child_classes:
+                authored_fragment_only = False
         if has_description and all_description_fragment:
             wrapper_classes.append("editorial-description-fragment")
+        if has_embedded_authored_work and authored_fragment_only:
+            wrapper_classes.append("embedded-authored-work-fragment")
     attrs = f'class="{" ".join(wrapper_classes)}"'
     if current_work:
         attrs += f' data-current-work="{html_escape(current_work)}"'

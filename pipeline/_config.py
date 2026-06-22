@@ -74,6 +74,8 @@ def apply_cli_overrides(settings: Settings, args: Any) -> Settings:
     """Apply only explicitly supplied CLI style overrides after config loading."""
     if args.title is not None:
         settings.title = args.title
+    if getattr(args, "author", None) is not None:
+        settings.author = args.author
     cli_to_setting = {
         "body_size": "body_size_pt",
         "line_height": "line_height",
@@ -87,6 +89,8 @@ def apply_cli_overrides(settings: Settings, args: Any) -> Settings:
         "margin_side": "margin_side_mm",
         "margin_bottom": "margin_bottom_mm",
         "runner_font": "runner_font_pt",
+        "runner_left_font": "runner_left_font_pt",
+        "runner_right_font": "runner_right_font_pt",
         "folio_font": "folio_font_pt",
         "runner_rule_gap": "runner_rule_gap_mm",
         "runner_body_clearance": "runner_body_clearance_mm",
@@ -101,6 +105,9 @@ def apply_cli_overrides(settings: Settings, args: Any) -> Settings:
         "paragraph_indent": "paragraph_indent_em",
         "subdivision_margin_top": "subdivision_margin_top_mm",
         "subdivision_margin_bottom": "subdivision_margin_bottom_mm",
+        "toc_mode": "toc_mode",
+        "back_toc_mode": "back_toc_mode",
+        "volume_mode": "volume_mode",
     }
     for cli_name, setting_name in cli_to_setting.items():
         value = getattr(args, cli_name, None)
@@ -127,6 +134,26 @@ def apply_cli_overrides(settings: Settings, args: Any) -> Settings:
     elif args.remove_all_images:
         settings.image_policy = "remove-all"
     return settings
+
+
+def resolve_toc_mode(settings: Settings, prompt_if_auto: bool = True) -> str:
+    """Resolve the effective TOC mode, prompting once in an interactive shell if needed."""
+    mode = clean_text(settings.toc_mode).strip().lower() or "auto"
+    if mode in {"simple", "hierarchical"}:
+        settings.toc_mode = mode
+        return mode
+    if not prompt_if_auto or not sys.stdin.isatty():
+        settings.toc_mode = "simple"
+        return settings.toc_mode
+    try:
+        answer = input("TOC mode? [s]imple / [h]ierarchical [Enter=simple]: ").strip().lower()
+    except EOFError:
+        answer = ""
+    if answer.startswith("h"):
+        settings.toc_mode = "hierarchical"
+    else:
+        settings.toc_mode = "simple"
+    return settings.toc_mode
 
 
 def write_default_config(path: str) -> None:

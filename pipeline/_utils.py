@@ -69,6 +69,30 @@ def clean_display_title(value: str | None) -> str:
     return clean_text(text)
 
 
+def _title_case(text: str) -> str:
+    """Convert titles that are predominantly uppercase to title case."""
+    alpha_chars = [c for c in text if c.isalpha()]
+    if not alpha_chars:
+        return text
+    upper_ratio = sum(1 for c in alpha_chars if c.isupper()) / len(alpha_chars)
+    # Detect mixed-case patterns like "LASTNAME by Firstname Lastname"
+    has_uppercase_phrase = bool(re.match(r"^[A-Z\u00c0-\u00d6\u00d8-\u00de]{2,}\b", text))
+    if upper_ratio > 0.7 or (upper_ratio > 0.4 and has_uppercase_phrase):
+        words = text.lower().split()
+        for i, w in enumerate(words):
+            if w and w[0].isalpha():
+                words[i] = w[0].upper() + w[1:]
+        return " ".join(words)
+    cased = re.sub(r"[-\u2014\u2013]+", " - ", text)
+    cased = re.sub(r"\s+", " ", cased).strip()
+    return cased
+
+
+def clean_display_title_for_toc(value: str | None) -> str:
+    """Clean display title and convert to title case for TOC display."""
+    return _title_case(clean_display_title(value))
+
+
 # --------------------------------------------------------------------------------------
 # Path / file utilities
 # --------------------------------------------------------------------------------------

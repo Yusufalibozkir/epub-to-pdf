@@ -31,6 +31,7 @@ from pipeline._ai import (
     require_openai_client,
 )
 from pipeline._classify import infer_title_with_source, read_epub, scan_spine_items
+from pipeline._classify import source_toc_top_level_titles
 from pipeline._cleaners import clean_document, fragment_is_title_only, sample_word_budget
 from pipeline._config import (
     apply_cli_overrides,
@@ -52,7 +53,7 @@ from pipeline._render import (
     write_build,
 )
 from pipeline._rule_packs import apply_rule_packs
-from pipeline._utils import clean_display_title, clean_text, copy_assets, visible_word_count
+from pipeline._utils import clean_display_title, clean_text, copy_assets, normalized_title_key, visible_word_count
 
 # Import new modules
 from pipeline._cache import PipelineCache
@@ -234,7 +235,7 @@ def _ck_clean_documents(ctx: PipelineContext) -> Optional[str]:
         "title": ctx.settings.title,
         "major_opener_blank_before": ctx.settings.major_opener_blank_before,
         "major_opener_blank_after": ctx.settings.major_opener_blank_after,
-        "cleanup_version": "v14-stateful-frontmatter-chapter-cache",
+        "cleanup_version": "v15-source-top-level-toc",
     })
     docs_hash = ctx.data.get("_docs_hash", "")
     return PipelineCache.hash_combined(docs_hash, settings_hash)
@@ -279,7 +280,14 @@ def _run_resolve_title(ctx: PipelineContext) -> dict:
     else:
         settings.title, log.title_source = infer_title_with_source(book, epub_path.stem)
 
-    return {"book": book, "items": items, "book_title": settings.title}
+    source_top_titles = source_toc_top_level_titles(book)
+    return {
+        "book": book,
+        "items": items,
+        "book_title": settings.title,
+        "_source_top_level_titles": source_top_titles,
+        "_source_top_level_keys": [normalized_title_key(t) for t in source_top_titles],
+    }
 
 
 def _run_read_assets(ctx: PipelineContext) -> dict:
@@ -335,6 +343,70 @@ def _run_prepare_fonts(ctx: PipelineContext) -> dict:
     return {"font_face_css": font_face_css}
 
 
+def _candidate_section_labels(doc: SpineDoc) -> list[str]:
+    labels: list[str] = []
+    heading_label = ""
+    if doc.headings:
+        first_heading = str(doc.headings[0])
+        heading_label = first_heading.split(":", 1)[1] if ":" in first_heading else first_heading
+    for value in (doc.major_title, doc.current_division, heading_label):
+        text = clean_display_title(value or "")
+        if text:
+            labels.append(text)
+    return list(dict.fromkeys(labels))
+
+
+def _resolve_section_subset(docs: list[SpineDoc], query: str) -> tuple[list[SpineDoc], dict[str, Any]]:
+    query_key = normalized_title_key(query)
+    if not query_key:
+        raise SystemExit("Section selector cannot be empty.")
+
+    start_idx: Optional[int] = None
+    start_kind = ""
+    resolved_label = ""
+    for idx, doc in enumerate(docs):
+        if doc.kind not in {"division", "major_work", "backmatter"}:
+            continue
+        for label in _candidate_section_labels(doc):
+            if normalized_title_key(label) == query_key:
+                start_idx = idx
+                start_kind = doc.kind
+                resolved_label = label
+                break
+        if start_idx is not None:
+            break
+
+    if start_idx is None:
+        raise SystemExit(
+            f'Could not resolve --section "{query}". Match a classified division, major work, or backmatter title.'
+        )
+
+    end_idx = len(docs)
+    for idx in range(start_idx + 1, len(docs)):
+        doc = docs[idx]
+        if start_kind == "division":
+            if doc.kind == "division":
+                end_idx = idx
+                break
+        elif doc.kind in {"division", "major_work", "backmatter"}:
+            end_idx = idx
+            break
+
+    subset = docs[start_idx:end_idx]
+    start_doc = docs[start_idx]
+    end_doc = docs[end_idx - 1]
+    return subset, {
+        "query": query,
+        "resolved_label": resolved_label,
+        "start_index": start_idx,
+        "end_index": end_idx - 1,
+        "start_href": start_doc.href,
+        "end_href": end_doc.href,
+        "start_kind": start_kind,
+        "doc_count": len(subset),
+    }
+
+
 def _run_clean_documents(ctx: PipelineContext) -> dict:
     """Clean and normalize all documents. Plugin cleaners are called per-doc."""
     from bs4 import BeautifulSoup as _BS
@@ -349,12 +421,35 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
     ai_client = ctx.data.get("_ai_client")
     ai_model = ctx.data.get("_ai_model", "gpt-5.4-mini")
     ai_provider = ctx.data.get("_ai_provider", "openai")
+    source_top_level_keys = set(str(k) for k in ctx.data.get("_source_top_level_keys", []) if str(k))
+    if source_top_level_keys:
+        log.warn(f"Detected {len(source_top_level_keys)} source top-level TOC title(s) for simple TOC filtering.")
+
+    section_info: Optional[dict[str, Any]] = None
+    seeded_work: Optional[str] = None
+    seeded_division: Optional[str] = None
+    if getattr(args, "section", None):
+        all_docs = docs
+        docs, section_info = _resolve_section_subset(docs, args.section)
+        log.warn(
+            f'Section preview active: "{args.section}" -> "{section_info["resolved_label"]}" '
+            f'({section_info["start_href"]} .. {section_info["end_href"]}, {section_info["doc_count"]} docs).'
+        )
+        for prior in all_docs[: int(section_info["start_index"])]:
+            if prior.remove:
+                continue
+            if prior.kind == "division" and prior.major_title:
+                seeded_division = clean_display_title(prior.major_title)
+                seeded_work = seeded_division
+            elif prior.kind in {"major_work", "backmatter"} and prior.major_title:
+                seeded_work = clean_display_title(prior.major_title)
+        ctx.data["_section_info"] = section_info
 
     toc: list[TocEntry] = []
     used_ids: set[str] = set()
     fragments: list[str] = []
-    current_work: Optional[str] = None
-    current_division: Optional[str] = None
+    current_work: Optional[str] = seeded_work
+    current_division: Optional[str] = seeded_division
     sample_budget = sample_word_budget(args.sample_pages)
     sample_words = 0
 
@@ -368,9 +463,10 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
         "smart_punctuation": settings.smart_punctuation,
         "footnote_handling": settings.footnote_handling,
         "title": settings.title,
+        "section": getattr(args, "section", None),
         "major_opener_blank_before": settings.major_opener_blank_before,
         "major_opener_blank_after": settings.major_opener_blank_after,
-        "cleanup_version": "v14-stateful-frontmatter-chapter-cache",
+        "cleanup_version": "v15-source-top-level-toc",
     })
 
     audit_list_names = ["removed_blocks", "removed_documents", "kept_images", "removed_images", "warnings", "ai_decisions"]
@@ -436,6 +532,29 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
             if "work-description" in _tag_classes(p)
         ]
 
+    def _first_content_tag(section: Any) -> Any:
+        for child in list(section.children):
+            if isinstance(child, str):
+                if clean_text(child):
+                    return child
+                continue
+            if child.name == "span" and "set-current-work" in _tag_classes(child):
+                continue
+            if clean_text(child.get_text(" ")) or child.find(["img", "svg", "table"]):
+                return child
+        return None
+
+    def _matches_source_top_level_opener(frag: str, doc: SpineDoc) -> bool:
+        if not source_top_level_keys:
+            return False
+        soup = _BS(frag, "lxml")
+        candidates = [doc.major_title, doc.current_division]
+        candidates.extend(h.get_text(" ", strip=True) for h in soup.find_all(["h1", "h2", "h3"], limit=4))
+        text = clean_text(soup.get_text(" "))
+        if text and visible_word_count(text) <= 24:
+            candidates.append(text)
+        return any(normalized_title_key(str(value or "")) in source_top_level_keys for value in candidates)
+
     def _stitch_description_fragment(frag: str) -> str:
         """Make split EPUB description fragments render as one continuous block."""
         if not fragments:
@@ -465,6 +584,68 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
         _set_tag_classes(cur_first, cur_classes)
         fragments[-1] = str(prev_soup)
         return str(cur_soup)
+
+    def _stitch_embedded_authored_opener_fragment(frag: str) -> str:
+        """Merge tiny authored-work opener fragments into the following body section."""
+        if not fragments:
+            return frag
+        cur_soup = _BS(frag, "lxml")
+        cur_section = cur_soup.find("section")
+        if cur_section is None:
+            return frag
+
+        prev_soup = _BS(fragments[-1], "lxml")
+        prev_section = prev_soup.find("section")
+        if prev_section is None or "embedded-authored-work-fragment" not in _tag_classes(prev_section):
+            return frag
+
+        cur_classes = _tag_classes(cur_section)
+        cur_has_chapter_opener = cur_section.find(class_=lambda c: c and "chapter-opener-block" in str(c).split()) is not None
+        if "starts-chapter-opener" not in cur_classes and not cur_has_chapter_opener:
+            return frag
+
+        first_cur = _first_content_tag(cur_section)
+        if first_cur is None:
+            return frag
+
+        moving_nodes = []
+        for child in list(prev_section.children):
+            if isinstance(child, str):
+                if clean_text(child):
+                    moving_nodes.append(child)
+                continue
+            if child.name == "span" and "set-current-work" in _tag_classes(child):
+                continue
+            if clean_text(child.get_text(" ")) or child.find(["img", "svg", "table"]):
+                moving_nodes.append(child.extract())
+        if not moving_nodes:
+            return frag
+
+        for node in moving_nodes:
+            if hasattr(first_cur, "insert_before"):
+                first_cur.insert_before(node)
+        _set_tag_classes(cur_section, _tag_classes(cur_section) + ["follows-embedded-authored-work"])
+        fragments[-1] = ""
+        return str(cur_soup)
+
+    def _mark_following_embedded_work_breaks() -> None:
+        """Force fresh pages between sibling embedded authored works."""
+        seen_embedded_authored = False
+        updated: list[str] = []
+        for frag in fragments:
+            soup = _BS(frag, "lxml")
+            section = soup.find("section")
+            if section is None:
+                updated.append(frag)
+                continue
+            first_tag = _first_content_tag(section)
+            first_classes = _tag_classes(first_tag) if hasattr(first_tag, "get") else []
+            if "embedded-authored-work" in first_classes:
+                if seen_embedded_authored:
+                    _set_tag_classes(section, _tag_classes(section) + ["starts-embedded-authored-work"])
+                seen_embedded_authored = True
+            updated.append(str(section))
+        fragments[:] = updated
 
     def _force_chapter_current_work(frag: str, doc: SpineDoc) -> tuple[str, Optional[str]]:
         if not clean_text(settings.title):
@@ -544,6 +725,7 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
                 current_work, current_division, log,
                 ai_client=(ai_client if args.openai_image_check else None),
                 ai_model=ai_model, ai_provider=ai_provider,
+                source_top_level_keys=source_top_level_keys,
             )
 
             # Plugin cleaners
@@ -571,7 +753,7 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
                 except Exception:
                     pass
 
-        if fragment_is_title_only(frag, settings):
+        if fragment_is_title_only(frag, settings) and not _matches_source_top_level_opener(frag, doc):
             log.removed_documents.append(f"{doc.index} {doc.href} skipped as duplicate/empty title-only fragment")
             continue
 
@@ -581,6 +763,7 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
                 frag = forced_frag
                 current_work = forced_current_work
             frag = _stitch_description_fragment(frag)
+            frag = _stitch_embedded_authored_opener_fragment(frag)
             fragments.append(frag)
             sample_words += visible_word_count(_BS(frag, "lxml").get_text(" "))
             clean_hash_parts.append(doc_cache_key or str(doc.index))
@@ -588,8 +771,10 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
     # Clear per-doc progress line
     print(f"  doc {total_docs}/{total_docs} done", file=sys.stderr)
 
+    fragments = [frag for frag in fragments if clean_text(frag)]
     if not fragments:
         raise SystemExit("No usable body content remained after cleanup. Retry with --keep-all-images or without --use-openai.")
+    _mark_following_embedded_work_breaks()
 
     clean_hash = PipelineCache.hash_combined(*clean_hash_parts) if clean_hash_parts else ""
     return {

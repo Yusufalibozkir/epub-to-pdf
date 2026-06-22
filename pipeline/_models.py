@@ -84,6 +84,8 @@ class Settings:
 
     # Book identity
     title: str = ""
+    author: str = ""
+    volume_mode: str = "auto"  # auto, single, collection
 
     # Page / trim
     trim_size: str = "A4"
@@ -118,6 +120,8 @@ class Settings:
 
     # Running heads / folios
     runner_font_pt: float = 9.4
+    runner_left_font_pt: Optional[float] = None
+    runner_right_font_pt: Optional[float] = None
     runner_letter_spacing_em: float = 0.04
     runner_rule_gap_mm: float = 3.2
     runner_body_clearance_mm: float = 7.0
@@ -127,8 +131,8 @@ class Settings:
     runner_rule_color: str = "#222"
     runner_layout: str = "right_title_full_rule"
     runner_rule_style: str = "full_width"
-    runner_collection_transform: str = "none"
-    runner_work_transform: str = "uppercase"
+    runner_collection_transform: str = "uppercase"
+    runner_work_transform: str = "none"
     folio_font_pt: float = 10.0
     front_folio_font_pt: float = 9.3
 
@@ -158,6 +162,8 @@ class Settings:
     minor_heading_font_pt: float = 11.4
 
     # Table of contents
+    toc_mode: str = "auto"
+    back_toc_mode: str = "off"
     toc_title_font_pt: float = 19.0
     toc_level_1_font_pt: float = 11.4
     toc_level_2_font_pt: float = 10.5
@@ -218,6 +224,7 @@ class TocEntry:
     title: str
     target_id: str
     kind: str = "work"  # division, work, backmatter
+    source_level: int = 0
 
 
 @dataclass
@@ -304,6 +311,7 @@ class QAVerdict:
     opener_page_warnings: list[dict[str, Any]] = field(default_factory=list)
     work_description_style_warnings: list[dict[str, Any]] = field(default_factory=list)
     first_body_folio_warnings: list[str] = field(default_factory=list)
+    source_apparatus_warnings: list[dict[str, Any]] = field(default_factory=list)
     openai_visual_flags: list[str] = field(default_factory=list)
     openai_visual_issue_lines: list[str] = field(default_factory=list)
     text_qa_flags: list[str] = field(default_factory=list)
@@ -332,6 +340,7 @@ class QAVerdict:
             or self.opener_page_warnings
             or self.work_description_style_warnings
             or self.first_body_folio_warnings
+            or self.source_apparatus_warnings
             or self.openai_visual_flags
             or self.text_qa_flags
             or self.font_embedding_warnings

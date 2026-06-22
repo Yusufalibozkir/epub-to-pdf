@@ -47,10 +47,12 @@ def render_pdf(build_dir: Path, out_pdf: Path) -> None:
 # ======================================================================================
 
 
-def optimize_pdf(path: Path) -> None:
+def optimize_pdf(path: Path, log: Optional[BuildLog] = None) -> None:
     try:
         import pikepdf
-    except Exception:
+    except Exception as exc:
+        if log is not None:
+            log.warn(f"pikepdf not available; PDF left unoptimized: {exc}")
         return
     tmp = path.with_suffix(".optimized.tmp.pdf")
     with pikepdf.open(path) as pdf:
@@ -143,29 +145,42 @@ def find_first_body_page_index(doc) -> Optional[int]:
     return None
 
 
-def draw_vector_runner_rules(pdf_path: Path, settings: Settings) -> None:
+def draw_vector_runner_rules(pdf_path: Path, settings: Settings, log: Optional[BuildLog] = None) -> None:
     """Draw safe full-width runner rules as explicit stroke-only vector paths."""
-    if settings.runner_layout.strip().lower() != "right_title_full_rule":
+    layout = settings.runner_layout.strip().lower()
+    rule_style = settings.runner_rule_style.strip().lower()
+    if layout != "right_title_full_rule":
+        # 'full_width' rules are only drawn here (CSS draws single/split rules).
+        # Pairing full_width with another layout yields no rule at all — warn so
+        # a missing running-head rule is not mistaken for a silent failure.
+        if rule_style == "full_width" and log is not None:
+            log.warn(
+                f"runner_rule_style is 'full_width' but runner_layout is '{settings.runner_layout}', "
+                "which draws no CSS rule and no vector rule; no running-head rule will be drawn."
+            )
         return
-    if settings.runner_rule_style.strip().lower() != "full_width":
+    if rule_style != "full_width":
         return
     try:
         import fitz
-    except Exception:
+    except Exception as exc:
+        if log is not None:
+            log.warn(f"PyMuPDF not available; vector runner rule skipped: {exc}")
         return
 
     doc = fitz.open(pdf_path)
     first_body = find_first_body_page_index(doc) or 0
     color = parse_hex_color(settings.runner_rule_color)
-    y = settings.runner_rule_y_mm * C.PT_PER_MM
-    x0 = settings.margin_side_mm * C.PT_PER_MM
-    x1 = C.A4_WIDTH_PT - x0
     changed = False
     try:
         for i in range(first_body, doc.page_count):
             page = doc[i]
             if not page_has_running_head(page, settings):
                 continue
+            page_rect = page.rect
+            y = settings.runner_rule_y_mm * C.PT_PER_MM
+            x0 = settings.margin_side_mm * C.PT_PER_MM
+            x1 = max(x0, page_rect.width - x0)
             shape = page.new_shape()
             shape.draw_line(fitz.Point(x0, y), fitz.Point(x1, y))
             shape.finish(color=color, fill=None, width=settings.runner_rule_weight_pt, closePath=False)
@@ -206,12 +221,11 @@ def resolve_toc_page_numbers(
     target_pages: dict[str, int] = {}
     link_rows: list[tuple[int, float, float, dict[str, Any]]] = []
     try:
+        first_body = find_first_body_page_index(doc)
+        # The front TOC may be simple while an optional back TOC is hierarchical.
+        # Scan the whole document so links that exist only in the back TOC can
+        # still provide page numbers on the second render pass.
         for page_index in range(doc.page_count):
-            page_text = doc[page_index].get_text("text")
-            if not re.search(r"\bCONTENTS\b|\bContents\b", page_text):
-                if link_rows:
-                    break
-                continue
             for link in doc[page_index].get_links():
                 rect = link.get("from")
                 y = float(rect.y0) if rect else 0.0
@@ -549,6 +563,54 @@ def analyze_stranded_headings(page, prev_page, page_no: int, settings) -> Option
 # ======================================================================================
 
 
+def _parse_css_length_to_pt(value: str) -> Optional[float]:
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)(mm|cm|in|pt)?", value.strip().lower())
+    if not match:
+        return None
+    amount = float(match.group(1))
+    unit = match.group(2) or "pt"
+    if unit == "pt":
+        return amount
+    if unit == "mm":
+        return amount * C.PT_PER_MM
+    if unit == "cm":
+        return amount * 10.0 * C.PT_PER_MM
+    if unit == "in":
+        return amount * 72.0
+    return None
+
+
+def expected_trim_size_points(settings: Optional[Settings]) -> tuple[float, float, str]:
+    """Return expected page width/height in points for the configured trim size."""
+    raw_trim = (settings.trim_size if settings else "A4") or "A4"
+    label = str(raw_trim).strip() or "A4"
+    normalized = re.sub(r"\s+", " ", label).strip().lower()
+    landscape = "landscape" in normalized
+    normalized = normalized.replace(" landscape", "").replace(" portrait", "").strip()
+    named_sizes = {
+        "a3": (297.0 * C.PT_PER_MM, 420.0 * C.PT_PER_MM),
+        "a4": (C.A4_WIDTH_PT, C.A4_HEIGHT_PT),
+        "a5": (148.0 * C.PT_PER_MM, 210.0 * C.PT_PER_MM),
+        "a6": (105.0 * C.PT_PER_MM, 148.0 * C.PT_PER_MM),
+        "letter": (8.5 * 72.0, 11.0 * 72.0),
+        "legal": (8.5 * 72.0, 14.0 * 72.0),
+    }
+    if normalized in named_sizes:
+        width, height = named_sizes[normalized]
+    else:
+        parts = re.split(r"\s+|x", normalized)
+        lengths = [_parse_css_length_to_pt(part) for part in parts if part]
+        lengths = [length for length in lengths if length is not None]
+        if len(lengths) >= 2:
+            width, height = lengths[0], lengths[1]
+        else:
+            width, height = C.A4_WIDTH_PT, C.A4_HEIGHT_PT
+            label = "A4"
+    if landscape and width < height:
+        width, height = height, width
+    return width, height, label
+
+
 def preflight_pdf(
     pdf_path: Path,
     out_dir: Path,
@@ -563,16 +625,20 @@ def preflight_pdf(
     verdict = QAVerdict(page_count=doc.page_count)
     first_body_index = find_first_body_page_index(doc)
     title_key = normalized_title_key(settings.title if settings else "")
+    expected_width_pt, expected_height_pt, expected_trim_label = expected_trim_size_points(settings)
 
-    # A4 page-size check
+    # Configured trim-size check
     for i, page in enumerate(doc):
         rect = page.rect
-        if abs(rect.width - C.A4_WIDTH_PT) > 2 or abs(rect.height - C.A4_HEIGHT_PT) > 2:
+        if abs(rect.width - expected_width_pt) > 2 or abs(rect.height - expected_height_pt) > 2:
             verdict.non_a4_pages.append(
                 {
                     "page": i + 1,
                     "width_pt": round(rect.width, 2),
                     "height_pt": round(rect.height, 2),
+                    "expected_trim": expected_trim_label,
+                    "expected_width_pt": round(expected_width_pt, 2),
+                    "expected_height_pt": round(expected_height_pt, 2),
                 }
             )
 
@@ -678,6 +744,24 @@ def preflight_pdf(
                     "page": i + 1,
                     "text": text[:180],
                     "issue": "page contains only title/running-head/folio-like text",
+                }
+            )
+
+    # Source/transcriber apparatus should not become early body pages.
+    source_apparatus_re = re.compile(
+        r"\b(transcriber[’']?s?\s+notes?|project gutenberg|produced by|e-?text prepared by|"
+        r"replicate this text|non-standard spelling|variations in spelling|typographical errors)\b",
+        re.I,
+    )
+    start = first_body_index if first_body_index is not None else 0
+    for i in range(start, min(doc.page_count, start + 6)):
+        text = clean_text(doc[i].get_text("text"))
+        if source_apparatus_re.search(text):
+            verdict.source_apparatus_warnings.append(
+                {
+                    "page": i + 1,
+                    "text": text[:240],
+                    "issue": "source/transcriber/publisher apparatus appears in early body pages",
                 }
             )
 
@@ -853,7 +937,7 @@ def preflight_pdf(
     report_lines = [
         f"PDF: {pdf_path.name}",
         f"Pages: {verdict.page_count}",
-        f"A4 pages: {'OK' if not verdict.non_a4_pages else 'WARN'}",
+        f"Page size ({expected_trim_label}): {'OK' if not verdict.non_a4_pages else 'WARN'}",
         "Fonts seen: " + (", ".join(verdict.fonts_seen) if verdict.fonts_seen else "not detected"),
         f"Images seen in final PDF: {verdict.images_seen}",
         f"Removed documents: {len(removed_documents)}",
@@ -867,7 +951,7 @@ def preflight_pdf(
         "Delivery blockers: " + ("YES" if verdict.has_blockers or log.hard_failures else "NO"),
     ]
     _append_list(report_lines, "Font embedding warnings", verdict.font_embedding_warnings)
-    _append_section(report_lines, "Non-A4 pages", verdict.non_a4_pages)
+    _append_section(report_lines, "Pages not matching expected trim", verdict.non_a4_pages)
     _append_section(report_lines, "Possible header/rule collisions", verdict.possible_header_collisions)
     _append_section(report_lines, "Possible broken word/single-letter line spills", verdict.possible_line_spills)
     _append_section(report_lines, "Possible narrow columns", verdict.possible_narrow_columns)
@@ -880,6 +964,7 @@ def preflight_pdf(
     _append_section(report_lines, "Opener/display-page warnings", verdict.opener_page_warnings)
     _append_section(report_lines, "Work-description style warnings", verdict.work_description_style_warnings)
     _append_list(report_lines, "Body folio warnings", verdict.first_body_folio_warnings)
+    _append_section(report_lines, "Source apparatus warnings", verdict.source_apparatus_warnings)
     _append_section(report_lines, "Possible orphan pages", verdict.possible_orphan_pages)
     _append_section(report_lines, "Possible widow lines", verdict.possible_widow_lines)
     _append_list(report_lines, "AI visual QA flags", verdict.openai_visual_flags)

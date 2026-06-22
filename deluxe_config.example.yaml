@@ -54,6 +54,8 @@ front_margin_bottom_mm: 24.0  # Front-matter bottom margin override.
 # Running heads and folios
 # =============================================================================
 runner_font_pt: 9.4
+runner_left_font_pt: null         # Optional side-specific override; null keeps the shared runner font size.
+runner_right_font_pt: null        # Optional side-specific override; null keeps the shared runner font size.
 runner_letter_spacing_em: 0.04
 runner_rule_gap_mm: 3.2           # Gap between runner text and the horizontal rule.
 runner_body_clearance_mm: 7.0     # Extra normal-page air between runner rule area and body text.
@@ -63,8 +65,8 @@ runner_rule_weight_pt: 0.45       # Thickness of the vector runner rule.
 runner_rule_color: "#222"         # Runner rule stroke colour.
 runner_layout: "right_title_full_rule"  # Layout: right_title_full_rule, centered_single_rule, dual_full_rule, alternating.
 runner_rule_style: "full_width"   # Rule rendering: full_width, single, split, none.
-runner_collection_transform: "none"      # CSS text-transform for collection title runner.
-runner_work_transform: "uppercase"       # CSS text-transform for current-work runner.
+runner_collection_transform: "uppercase"  # CSS text-transform for collection title runner.
+runner_work_transform: "none"            # CSS text-transform for current-work runner.
 folio_font_pt: 10.0
 front_folio_font_pt: 9.3
 

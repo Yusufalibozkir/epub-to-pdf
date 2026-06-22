@@ -32,6 +32,7 @@ It is implemented as a modular Python package (`pipeline/`) with a DAG-based exe
 - **Rule-pack system**: YAML files extending the 13 built-in regex patterns
 - **DAG-based execution**: cached, dependency-ordered processing stages
 - **Content-addressed caching**: SHA-256 keyed intermediate results avoid redundant work
+- Batch conversion for folders of EPUB files, with skip-existing and JSON batch reports
 - `--strict` mode that fails if delivery-blocking QA warnings remain
 - Machine-readable `qa_verdict.json` and `build_summary.json` in per-run artifact folders
 
@@ -121,6 +122,45 @@ Then build the full PDF:
 python deluxe_epub_to_pdf.py "book.epub" --out "full_print.pdf" --full-without-sample --use-openai --openai-qa --strict
 ```
 
+For faster debugging of one troublesome logical slice, render only that section after full-book scanning/classification:
+
+```powershell
+python deluxe_epub_to_pdf.py "book.epub" --section "The Biographies" --out "biographies-preview.pdf" --sample-pages 20 --debug-html
+```
+
+`--section` currently matches classified division / major-work / backmatter titles, then renders only that contiguous slice. The generated title page and subset-scoped TOC are still included by default, so full-book renders are still required before final approval.
+
+
+## Batch conversion
+
+Use `--batch` to convert every EPUB in a folder. Batch mode reuses the same single-book pipeline for each file, so config files, QA reports, artifacts, caching, and sample/full-build options work the same way.
+
+Recommended first pass:
+
+```powershell
+python deluxe_epub_to_pdf.py --batch "books" --config my_style.yaml --out output --batch-title-source filename --sample-pages 50 --skip-existing
+```
+
+Full build after sample approval:
+
+```powershell
+python deluxe_epub_to_pdf.py --batch "books" --config my_style.yaml --out output --batch-title-source metadata --full-without-sample --skip-existing
+```
+
+Useful batch options:
+
+```text
+--batch DIR             Convert all EPUB files in a folder.
+--recursive             Include subfolders.
+--batch-glob PATTERN    File pattern to match. Default: *.epub.
+--skip-existing         Do not rebuild PDFs already present in --output-dir.
+--on-error continue     Keep processing remaining books after a failure.
+--on-error stop         Stop at the first failed book.
+--batch-title-source    Choose metadata or filename for the displayed title.
+```
+
+Batch mode creates one PDF per EPUB using a safe filename derived from the EPUB name, for example `books/Anna Karenina.epub` becomes `output/anna-karenina.pdf`. In batch mode, `--out` can point to the output folder, or you can use `--output-dir` if you prefer the explicit folder flag. Use `--batch-title-source metadata` to keep EPUB metadata titles, or `--batch-title-source filename` to use the filename stem as the displayed title. Do not use `--title` with `--batch`; each book needs its own title source. A JSON report is written to `artifacts/batch_report_YYYYMMDD_HHMMSS.json`.
+
 
 ## Configuration file
 
@@ -152,7 +192,9 @@ Quick command-line overrides still work and take priority over the config:
 python deluxe_epub_to_pdf.py "book.epub" --config my_style.yaml --body-size 12 --line-height 1.28 --sample-pages 50
 ```
 
-Common config keys include `body_size_pt`, `line_height`, `font_stack`, `margin_top_mm`, `margin_side_mm`, `margin_bottom_mm`, `runner_font_pt`, `folio_font_pt`, `runner_rule_y_mm`, `runner_title_top_mm`, `runner_body_clearance_mm`, `paragraph_indent_em`, `work_description_font_delta_pt`, `work_description_bottom_margin_mm`, `part_heading_font_pt`, `chapter_section_font_pt`, `verse_line_height`, `verse_max_width_mm`, `verse_font_size_delta_pt`, and `image_policy`. See `deluxe_config.example.yaml` for the full list.
+Common config keys include `body_size_pt`, `line_height`, `font_stack`, `margin_top_mm`, `margin_side_mm`, `margin_bottom_mm`, `runner_font_pt`, `runner_left_font_pt`, `runner_right_font_pt`, `folio_font_pt`, `runner_rule_y_mm`, `runner_title_top_mm`, `runner_body_clearance_mm`, `paragraph_indent_em`, `work_description_font_delta_pt`, `work_description_bottom_margin_mm`, `part_heading_font_pt`, `chapter_section_font_pt`, `verse_line_height`, `verse_max_width_mm`, `verse_font_size_delta_pt`, `toc_mode`, `author`, and `image_policy`. See `deluxe_config.example.yaml` for the full list.
+
+For TOCs, `toc_mode: simple` keeps only the top-level entries and makes the list short and flat, while `toc_mode: hierarchical` preserves nesting with cleaner indentation. If you leave it at `auto`, the CLI will ask once in an interactive shell and otherwise default to the simple version.
 
 The default typography is EB Garamond. The project embeds local font files from `fonts/` by default, controlled by `embed_font_files`, `font_dir`, `embedded_font_family`, `embedded_font_regular`, `embedded_font_italic`, and `embedded_font_weight`. This prevents WeasyPrint from silently falling back to Times New Roman or a system Garamond when EB Garamond is not installed.
 
@@ -211,7 +253,7 @@ Only add `--openai-image-check` if image handling is important or the EPUB has m
 
 ## Strict mode
 
-`--strict` exits with an error if the PDF has delivery-blocking QA warnings such as possible header collisions, black/dark page artifacts, non-A4 pages, possible blank-page artifacts, or single-letter line spills.
+`--strict` exits with an error if the PDF has delivery-blocking QA warnings such as possible header collisions, black/dark page artifacts, pages not matching the configured trim size, possible blank-page artifacts, or single-letter line spills.
 
 This is intentional. Your prompt treats those as hard failures, so the script should not quietly pretend the PDF is print-ready.
 
@@ -221,17 +263,19 @@ This is as comprehensive as a local automated pipeline can reasonably be, but no
 
 ## Running-head style
 
-The default header follows the reference-style classic page head: verso/left pages show the collection title, recto/right pages show the current major work, and a single full-width hairline rule is drawn across the text block as a safe vector stroke. Configure it with:
+The default header follows the reference-style classic page head: verso/left pages show the collection title in caps, recto/right pages show the current major work in regular text, and a single full-width hairline rule is drawn across the text block as a safe vector stroke. If a page only carries a structural label like `CHAPTER I` or `PART 1`, the recto runner falls back to the author name when available. Configure it with:
 
 ```yaml
 runner_layout: "right_title_full_rule"
 runner_rule_style: "full_width"
-runner_collection_transform: "none"
-runner_work_transform: "uppercase"
+runner_collection_transform: "uppercase"
+runner_work_transform: "none"
 runner_title_top_mm: 8.5
 runner_rule_y_mm: 17.0
 runner_body_clearance_mm: 6.0
 runner_rule_color: "#222"
+runner_left_font_pt: null
+runner_right_font_pt: null
 ```
 
 Other supported runner layouts:

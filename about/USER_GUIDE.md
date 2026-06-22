@@ -208,6 +208,39 @@ python deluxe_epub_to_pdf.py "book.epub" --out "full_print.pdf" --full-without-s
 
 `--strict` tells the script to fail if delivery-blocking QA warnings remain.
 
+### Batch folder builds
+
+Use `--batch` when you want to run the same config over a folder of EPUB files. The batch runner processes books one at a time and calls the normal single-book pipeline for each EPUB.
+
+Build review samples first:
+
+```powershell
+python deluxe_epub_to_pdf.py --batch "books" --config my_style.yaml --out output --batch-title-source filename --sample-pages 50 --skip-existing
+```
+
+After approving the samples, build full PDFs:
+
+```powershell
+python deluxe_epub_to_pdf.py --batch "books" --config my_style.yaml --out output --batch-title-source metadata --full-without-sample --skip-existing
+```
+
+Useful batch flags:
+
+| Flag | Meaning |
+|---|---|
+| `--out output` | Use a folder-like `--out` value as the batch output folder. |
+| `--output-dir output` | Explicit batch output folder. |
+| `--batch DIR` | Convert all EPUB files in a folder. |
+| `--recursive` | Include EPUBs in subfolders. |
+| `--batch-glob PATTERN` | Change the discovery pattern. Default: `*.epub`. |
+| `--skip-existing` | Skip a book when the target PDF already exists. |
+| `--on-error continue` | Continue after a failed book. This is the default. |
+| `--on-error stop` | Stop after the first failed book. |
+| `--batch-title-source metadata` | Keep EPUB metadata titles. |
+| `--batch-title-source filename` | Use the EPUB filename stem as the displayed title. |
+
+Do not use `--title` with `--batch`. Each EPUB gets its own output PDF name and its own title source. The batch summary is written to `artifacts/batch_report_YYYYMMDD_HHMMSS.json`.
+
 ---
 
 ## 10. Configuration files
@@ -332,6 +365,8 @@ front_margin_bottom_mm: 24.0
 
 ```yaml
 runner_font_pt: 9.4
+runner_left_font_pt: null
+runner_right_font_pt: null
 runner_letter_spacing_em: 0.04
 runner_rule_gap_mm: 3.2
 runner_body_clearance_mm: 6.0
@@ -341,15 +376,19 @@ runner_rule_weight_pt: 0.45
 runner_rule_color: "#222"
 runner_layout: "right_title_full_rule"
 runner_rule_style: "full_width"
-runner_collection_transform: "none"
-runner_work_transform: "uppercase"
+runner_collection_transform: "uppercase"
+runner_work_transform: "none"
 folio_font_pt: 10.0
 front_folio_font_pt: 9.3
+volume_mode: "auto"
 ```
 
 | Key | Meaning |
 |---|---|
+| `volume_mode` | Book-structure mode for runner logic: `auto`, `single`, or `collection`. |
 | `runner_font_pt` | Running-head text size. |
+| `runner_left_font_pt` | Optional verso runner font size. Omit or set null to follow `runner_font_pt`. |
+| `runner_right_font_pt` | Optional recto runner font size. Omit or set null to follow `runner_font_pt`. |
 | `runner_letter_spacing_em` | Letter spacing for running heads. |
 | `runner_rule_gap_mm` | CSS clearance around the runner rule. |
 | `runner_body_clearance_mm` | Extra gap between runner-rule area and body text. |
@@ -443,6 +482,7 @@ toc_level_3_font_pt: 10.0
 toc_level_4_font_pt: 9.7
 toc_line_height: 1.11
 toc_entry_gap_mm: 2.9
+toc_mode: simple
 ```
 
 | Key | Meaning |
@@ -454,6 +494,7 @@ toc_entry_gap_mm: 2.9
 | `toc_level_4_font_pt` | Fourth-level TOC entry size. |
 | `toc_line_height` | TOC line-height. Reduce if TOC looks too loose. |
 | `toc_entry_gap_mm` | Vertical gap between TOC entries. |
+| `toc_mode` | `simple` keeps only the top-level TOC entries. `hierarchical` keeps nesting. `auto` prompts in an interactive shell. |
 
 If the TOC looks ugly or too loose, try:
 
@@ -462,6 +503,7 @@ toc_level_1_font_pt: 10.8
 toc_level_2_font_pt: 10.0
 toc_line_height: 1.04
 toc_entry_gap_mm: 2.1
+toc_mode: simple
 ```
 
 ### Poetry and verse

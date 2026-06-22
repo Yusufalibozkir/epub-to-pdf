@@ -50,7 +50,9 @@ PROMO_PATTERNS: re.Pattern = _register("PROMO_PATTERNS",
     r"(delphi classics|also available|other books by|more books by|subscribe|newsletter|"
     r"visit our website|follow us|kindle|ebook|smashwords|gutenberg license|project gutenberg license|"
     r"catalogue|catalog|advertisement|promotion|publisher's note to the reader|download our|"
-    r"copyrighted images? removed|www\.|https?://|isbn|app store|google play|goodreads)",
+    r"copyrighted images? removed|copyright|all rights reserved|beautifully illustrated|"
+    r"comprehensive editions|bonus texts|explore (science and philosophy|our wide range)|"
+    r"the delphi classics catalogue|www\.|https?://|isbn|app store|google play|goodreads)",
 )
 
 BACKMATTER_PATTERNS: re.Pattern = _register("BACKMATTER_PATTERNS",
@@ -68,7 +70,7 @@ LOCAL_TOC_HEADINGS: re.Pattern = _register("LOCAL_TOC_HEADINGS",
 
 COLLECTION_DIVISIONS: re.Pattern = _register("COLLECTION_DIVISIONS",
     r"^(the )?(novels|short stories|stories|plays|poetry|poems|memoirs|letters|notebooks|"
-    r"essays|biography|appendices|tales|sketches|dramas|translations|miscellanies|"
+    r"essays|biograph(y|ies)|appendices|tales|sketches|dramas|translations|miscellanies|"
     r"non[- ]fiction|verse|narrative poems|lyric poems)$",
 )
 
@@ -77,7 +79,7 @@ MAJOR_WORK_HINTS: re.Pattern = _register("MAJOR_WORK_HINTS",
 )
 
 CHAPTER_HEADINGS: re.Pattern = _register("CHAPTER_HEADINGS",
-    r"^(chapter|part|scene|act|section|proposition|article|letter|canto|book)\b|^[ivxlcdm]+$|^\d+$",
+    r"^(chapter|chap\.?|part|scene|act|section|proposition|article|letter|canto|book)\b|^[ivxlcdm]+$|^\d+$",
 )
 
 CAST_HEADINGS: re.Pattern = _register("CAST_HEADINGS",
