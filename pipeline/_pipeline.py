@@ -32,7 +32,7 @@ from pipeline._ai import (
 )
 from pipeline._classify import infer_title_with_source, read_epub, scan_spine_items
 from pipeline._classify import source_toc_top_level_titles
-from pipeline._cleaners import clean_document, fragment_is_title_only, sample_word_budget
+from pipeline._cleaners import clean_document, fragment_has_printable_content, fragment_is_title_only, sample_word_budget
 from pipeline._config import (
     apply_cli_overrides,
     load_config,
@@ -235,7 +235,7 @@ def _ck_clean_documents(ctx: PipelineContext) -> Optional[str]:
         "title": ctx.settings.title,
         "major_opener_blank_before": ctx.settings.major_opener_blank_before,
         "major_opener_blank_after": ctx.settings.major_opener_blank_after,
-        "cleanup_version": "v15-source-top-level-toc",
+        "cleanup_version": "v18-skip-empty-body-shells",
     })
     docs_hash = ctx.data.get("_docs_hash", "")
     return PipelineCache.hash_combined(docs_hash, settings_hash)
@@ -466,7 +466,7 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
         "section": getattr(args, "section", None),
         "major_opener_blank_before": settings.major_opener_blank_before,
         "major_opener_blank_after": settings.major_opener_blank_after,
-        "cleanup_version": "v15-source-top-level-toc",
+        "cleanup_version": "v18-skip-empty-body-shells",
     })
 
     audit_list_names = ["removed_blocks", "removed_documents", "kept_images", "removed_images", "warnings", "ai_decisions"]
@@ -648,7 +648,18 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
         fragments[:] = updated
 
     def _force_chapter_current_work(frag: str, doc: SpineDoc) -> tuple[str, Optional[str]]:
+        """Force single-book chapter runners to the volume title.
+
+        Collected/complete works must keep the active dialogue/work title. Forcing
+        the EPUB title here was wiping major-work state and recreating openers.
+        """
         if not clean_text(settings.title):
+            return frag, None
+        volume_mode = clean_text(settings.volume_mode).strip().lower() or "auto"
+        if volume_mode == "collection":
+            return frag, None
+        if volume_mode != "single" and len(source_top_level_keys) >= 5:
+            # Auto-detect collected works from a rich source nav TOC.
             return frag, None
         title = clean_display_title(settings.title)
         soup = _BS(frag, "lxml")
@@ -757,7 +768,11 @@ def _run_clean_documents(ctx: PipelineContext) -> dict:
             log.removed_documents.append(f"{doc.index} {doc.href} skipped as duplicate/empty title-only fragment")
             continue
 
-        if clean_text(_BS(frag, "lxml").get_text(" ")) or "<img" in frag or "<table" in frag:
+        if not fragment_has_printable_content(frag):
+            log.removed_documents.append(f"{doc.index} {doc.href} skipped as empty media/layout shell")
+            continue
+
+        if clean_text(_BS(frag, "lxml").get_text(" ")) or "<img" in frag or "<table" in frag or "<h1" in frag or "<h2" in frag:
             forced_frag, forced_current_work = _force_chapter_current_work(frag, doc)
             if forced_current_work:
                 frag = forced_frag

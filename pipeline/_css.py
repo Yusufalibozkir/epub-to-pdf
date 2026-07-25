@@ -331,10 +331,21 @@ body {{ margin: 0; }}
 .epub-doc.starts-chapter-opener {{ break-before: auto; }}
 .epub-doc.doc-frontmatter {{ page: front; break-before: page; }}
 .true-blank {{ page: nofolio; break-before: page; break-after: page; height: 0; }}
+/* First body opener should not mint an empty numbered body page after front matter. */
+.main > .epub-doc:first-of-type > .major-opener-separator.before-major-opener {{
+  display: none;
+}}
 h1, h2, h3, h4, h5, h6 {{ font-weight: 400; orphans: 2; widows: 2; hyphens: none; break-after: avoid-page; }}
-h1.major-work, h2.major-work, h1.collection-division {{
+h1.major-work, h2.major-work, h1.collection-division, h2.collection-division {{
   page: opener; break-before: page; break-after: page; string-set: current-work content();
   margin: {settings.major_opener_top_margin_mm}mm 0 {settings.major_opener_bottom_margin_mm}mm; text-align: center; font-size: {settings.major_work_font_pt}pt; line-height: 1.08; letter-spacing: .04em; text-transform: uppercase;
+}}
+.main > .epub-doc:first-of-type > h1.major-work,
+.main > .epub-doc:first-of-type > h2.major-work,
+.main > .epub-doc:first-of-type > h1.collection-division,
+.main > .epub-doc:first-of-type > h2.collection-division {{
+  break-before: auto;
+  page-break-before: auto;
 }}
 h1.backmatter-opener, h2.backmatter-opener, h3.structural-backmatter-opener {{
   page: body;
@@ -404,9 +415,10 @@ h2.subdivision + p.author-note {{
 .epub-doc.starts-major-work > h1.major-work,
 .epub-doc.starts-major-work > h2.major-work,
 .epub-doc.starts-major-work > h1.collection-division,
+.epub-doc.starts-major-work > h2.collection-division,
 .epub-doc.starts-major-work > h1.frontmatter-opener,
 .epub-doc.starts-major-work > h2.frontmatter-opener {{ break-before: page; }}
-h1.collection-division {{ font-size: {settings.collection_division_font_pt}pt; letter-spacing: .07em; }}
+h1.collection-division, h2.collection-division {{ font-size: {settings.collection_division_font_pt}pt; letter-spacing: .07em; }}
 h1.subdivision, h2.subdivision {{
   break-after: avoid-page; page-break-after: avoid; orphans: 2; widows: 2; margin: {settings.subdivision_margin_top_mm}mm 0 {settings.subdivision_margin_bottom_mm}mm; text-align: center; font-size: {settings.subdivision_font_pt}pt; letter-spacing: .035em; text-transform: uppercase;
 }}

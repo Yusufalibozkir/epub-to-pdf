@@ -4,6 +4,8 @@ __pycache__/
 
 output/
 artifacts/
+web_uploads/
+web_jobs/
 
 book.epub
 *.epub

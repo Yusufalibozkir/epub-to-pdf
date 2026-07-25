@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings · Deluxe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="side-brand">
+        <div class="logo">Deluxe</div>
+        <p>EPUB to print PDF</p>
+      </div>
+      <nav class="side-nav">
+        <a href="/">New build</a>
+        <a href="/#jobs">Jobs</a>
+        <a href="/#proof">Proof</a>
+        <a href="/settings" class="active">Settings</a>
+      </nav>
+      <div class="side-foot">
+        <a class="text-btn" href="/">Back to build</a>
+        <span>localhost:8765</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="main-head">
+        <div>
+          <h1>Settings</h1>
+          <p>All <code>Settings</code> fields. Values show defaults overridden by the selected config file.</p>
+        </div>
+        <div class="head-status">
+          <span>config</span>
+          <strong id="cfg-name">—</strong>
+        </div>
+      </header>
+
+      <section class="block">
+        <div class="settings-toolbar">
+          <label>
+            Config file
+            <select id="config-select"></select>
+          </label>
+          <label class="check-inline">
+            <input type="checkbox" id="only-overridden" />
+            Show overridden only
+          </label>
+          <input id="settings-filter" type="search" placeholder="Filter by name…" />
+        </div>
+        <p class="fineprint" id="settings-meta"></p>
+        <div class="settings-table-wrap">
+          <table class="settings-table" id="settings-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Value</th>
+                <th>Default</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const state = { fields: [], config: "A4.yaml" };
+
+    async function fetchJSON(url) {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    }
+
+    function fmt(value) {
+      if (value === null || value === undefined) return "null";
+      if (typeof value === "string") return value === "" ? '""' : value;
+      return JSON.stringify(value);
+    }
+
+    function render() {
+      const q = document.getElementById("settings-filter").value.trim().toLowerCase();
+      const only = document.getElementById("only-overridden").checked;
+      const tbody = document.querySelector("#settings-table tbody");
+      tbody.innerHTML = "";
+      let shown = 0;
+      for (const field of state.fields) {
+        if (only && !field.overridden) continue;
+        if (q && !field.name.toLowerCase().includes(q)) continue;
+        shown += 1;
+        const tr = document.createElement("tr");
+        if (field.overridden) tr.className = "overridden";
+        tr.innerHTML = `
+          <td><code>${field.name}</code></td>
+          <td>${fmt(field.value)}</td>
+          <td class="default">${fmt(field.default)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+      document.getElementById("settings-meta").textContent =
+        `${shown} shown · ${state.fields.length} total · config ${state.config}`;
+      document.getElementById("cfg-name").textContent = state.config;
+    }
+
+    async function loadSettings(config) {
+      const data = await fetchJSON(`/api/settings?config=${encodeURIComponent(config)}`);
+      state.fields = data.fields || [];
+      state.config = data.config;
+      render();
+    }
+
+    async function boot() {
+      const configs = await fetchJSON("/api/configs");
+      const select = document.getElementById("config-select");
+      select.innerHTML = "";
+      for (const cfg of configs.configs) {
+        const opt = document.createElement("option");
+        opt.value = cfg.path;
+        opt.textContent = cfg.name;
+        if (cfg.name === "A4.yaml") opt.selected = true;
+        select.appendChild(opt);
+      }
+      const params = new URLSearchParams(location.search);
+      const initial = params.get("config") || select.value || "A4.yaml";
+      select.value = initial;
+      select.addEventListener("change", () => loadSettings(select.value));
+      document.getElementById("settings-filter").addEventListener("input", render);
+      document.getElementById("only-overridden").addEventListener("change", render);
+      await loadSettings(initial);
+    }
+
+    boot().catch((err) => {
+      document.getElementById("settings-meta").textContent = err.message;
+    });
+  </script>
+</body>
+</html>

@@ -580,6 +580,20 @@ def _looks_like_real_prose_or_dialogue(text: str) -> bool:
 
 
 def remove_empty_layout_shells(soup: BeautifulSoup, log: BuildLog) -> None:
+    """Remove hollow layout wrappers, including SVG/image shells with no real asset."""
+    for image in list(soup.find_all("image")):
+        href = (image.get("href") or image.get("xlink:href") or "").strip()
+        if not href:
+            strip_tag(image)
+    for svg in list(soup.find_all("svg")):
+        if svg.find("image"):
+            continue
+        # Keep SVGs that still draw vector content; drop empty shells.
+        if not clean_text(svg.get_text(" ")) and not svg.find(["path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "use"]):
+            strip_tag(svg)
+    for img in list(soup.find_all("img")):
+        if not (img.get("src") or "").strip():
+            strip_tag(img)
     for tag in reversed(list(soup.find_all(["figure", "div", "section"]))):
         classes = tag.get("class", [])
         if isinstance(classes, str):
@@ -596,9 +610,44 @@ def remove_empty_layout_shells(soup: BeautifulSoup, log: BuildLog) -> None:
             strip_tag(tag)
 
 
+def fragment_has_printable_content(frag: str) -> bool:
+    """Return False for runner-only / hollow-media fragments that would mint blank body pages."""
+    soup = BeautifulSoup(frag, "lxml")
+    for el in list(soup.select("span.set-current-work, .true-blank, .major-opener-separator")):
+        strip_tag(el)
+    for image in list(soup.find_all("image")):
+        href = (image.get("href") or image.get("xlink:href") or "").strip()
+        if not href:
+            strip_tag(image)
+    for svg in list(soup.find_all("svg")):
+        if not svg.find("image") and not svg.find(
+            ["path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "text", "use"]
+        ):
+            strip_tag(svg)
+    for img in list(soup.find_all("img")):
+        if not (img.get("src") or "").strip():
+            strip_tag(img)
+    if clean_text(soup.get_text(" ")):
+        return True
+    if soup.find("img", src=True) or soup.find("table"):
+        return True
+    for image in soup.find_all("image"):
+        if (image.get("href") or image.get("xlink:href") or "").strip():
+            return True
+    if soup.find(["h1", "h2", "h3", "h4"]):
+        return True
+    return False
+
+
 def remove_duplicate_current_work_title_line(
     soup: BeautifulSoup, current_work: Optional[str], doc: SpineDoc, log: BuildLog
 ) -> None:
+    """Drop a repeated work title at the start of a body document.
+
+    Delphi editions often reprint the dialogue name both on the title card and
+    again immediately before PERSONS OF THE DIALOGUE / SCENE. Keep the opener;
+    remove later paragraph reprints on continuation docs.
+    """
     if not current_work or doc.kind in {"major_work", "play", "backmatter", "division"}:
         return
     body = soup.body or soup
@@ -1008,9 +1057,56 @@ def simple_typographic_cleanup(soup: BeautifulSoup, log: BuildLog) -> None:
 # ======================================================================================
 
 
-def promote_paragraph_headings(soup: BeautifulSoup, log: BuildLog) -> None:
-    """Promote disguised headings in <p>/<div> tags to proper <h2>."""
+def _seed_doc_from_source_top_level(
+    soup: BeautifulSoup,
+    doc: SpineDoc,
+    source_top_level_keys: Optional[set[str]],
+    current_work: Optional[str] = None,
+) -> None:
+    """Mark short Delphi title-card docs as major works from the EPUB nav TOC."""
+    if not source_top_level_keys:
+        return
+    if doc.kind in {"promo", "local_toc", "frontmatter", "backmatter", "division", "major_work", "play"}:
+        return
+    body = soup.body or soup
+    first = first_significant_tag(body)
+    if not isinstance(first, Tag):
+        return
+    text = clean_display_title(first.get_text(" "))
+    if not text or visible_word_count(text) > 8:
+        return
+    text_key = normalized_title_key(text)
+    if text_key not in source_top_level_keys:
+        return
+    # Body files often reprint the dialogue title; do not re-open the same work.
+    if current_work and text_key == normalized_title_key(current_work):
+        return
+    if C.COLLECTION_DIVISIONS.match(text.rstrip(" .")):
+        doc.kind = "division"
+        doc.major_title = text
+        doc.current_division = text
+    else:
+        doc.kind = "major_work"
+        doc.major_title = text
+    doc.confidence = max(float(doc.confidence or 0), 0.82)
+    doc.notes = (doc.notes + " " if doc.notes else "") + "Seeded from source top-level TOC title."
+
+
+def promote_paragraph_headings(
+    soup: BeautifulSoup,
+    log: BuildLog,
+    source_top_level_keys: Optional[set[str]] = None,
+) -> None:
+    """Promote disguised headings in <p>/<div> tags to proper <h2>.
+
+    Delphi-style collected works often put major dialogue/work titles in bold
+    paragraphs rather than real heading tags. When those titles match the EPUB
+    nav top-level TOC, promote them so normalize_headings can mark major-work
+    openers without AI assistance.
+    """
+    source_top_level_keys = source_top_level_keys or set()
     last_heading: Optional[Tag] = None
+    promoted = 0
     for tag in list(soup.find_all(["p", "div"])):
         if tag.find_parent(["blockquote", "table", "figcaption"]):
             continue
@@ -1019,7 +1115,30 @@ def promote_paragraph_headings(soup: BeautifulSoup, log: BuildLog) -> None:
         text = clean_display_title(tag.get_text(" "))
         if not text or len(text) > 80 or visible_word_count(text) > 8:
             continue
-        is_chapter_heading = C.CHAPTER_HEADINGS.match(text) is not None
+        text_key = normalized_title_key(text)
+        bare = text.rstrip(" .")
+        is_source_top_level = bool(text_key and text_key in source_top_level_keys)
+        # Only promote source TOC titles when they open the document (Delphi
+        # title cards). Mid-document hits are usually mini-TOC entries.
+        if is_source_top_level:
+            prior_significant = 0
+            for prev in tag.previous_elements:
+                if not isinstance(prev, Tag) or prev.name not in {"p", "div", "h1", "h2", "h3", "h4"}:
+                    continue
+                if prev.find_parent(["blockquote", "table", "figcaption"]):
+                    continue
+                if clean_text(prev.get_text(" ")):
+                    prior_significant += 1
+                    if prior_significant:
+                        break
+            if prior_significant:
+                is_source_top_level = False
+        is_chapter_heading = C.CHAPTER_HEADINGS.match(text) is not None or C.CHAPTER_HEADINGS.match(bare) is not None
+        is_inwork_label = (
+            not is_source_top_level
+            and C.FRONTMATTER_PATTERNS.match(bare) is not None
+            and visible_word_count(bare) <= 4
+        )
         prev = tag.find_previous_sibling()
         while isinstance(prev, NavigableString) and not clean_text(str(prev)):
             prev = prev.previous_sibling
@@ -1027,6 +1146,7 @@ def promote_paragraph_headings(soup: BeautifulSoup, log: BuildLog) -> None:
         looks_like_dialogue = text.startswith(('"', "'", "\u201c", "\u2018"))
         is_section_label = (
             not is_chapter_heading
+            and not is_source_top_level
             and follows_heading
             and text.isupper()
             and visible_word_count(text) <= 5
@@ -1036,13 +1156,14 @@ def promote_paragraph_headings(soup: BeautifulSoup, log: BuildLog) -> None:
         if not is_section_label:
             is_section_label = (
                 not is_chapter_heading
+                and not is_source_top_level
                 and last_heading is not None
                 and text.isupper()
                 and visible_word_count(text) <= 5
                 and not re.search(r"[.!?]$", text)
                 and not looks_like_dialogue
             )
-        if not is_chapter_heading and not is_section_label:
+        if not is_chapter_heading and not is_section_label and not is_source_top_level and not is_inwork_label:
             continue
         anchors = tag.find_all("a")
         first_anchor_id = ""
@@ -1051,7 +1172,12 @@ def promote_paragraph_headings(soup: BeautifulSoup, log: BuildLog) -> None:
             if first_anchor_id:
                 break
         tag.name = "h2"
-        classes = ["chapter-section-heading"] if is_section_label else ["subdivision"]
+        if is_source_top_level:
+            classes = ["source-top-level-title"]
+        elif is_section_label or is_inwork_label:
+            classes = ["chapter-section-heading"]
+        else:
+            classes = ["subdivision"]
         if is_chapter_heading and re.match(r"^part\b", text, re.I):
             classes.append("part-heading")
         tag["class"] = add_classes(tag, classes)
@@ -1060,6 +1186,9 @@ def promote_paragraph_headings(soup: BeautifulSoup, log: BuildLog) -> None:
         tag.clear()
         tag.string = text
         last_heading = tag
+        promoted += 1
+    if promoted:
+        log.warn(f"Promoted {promoted} paragraph/div label(s) to headings.")
 
 
 def normalize_headings(
@@ -1114,6 +1243,16 @@ def normalize_headings(
         is_major = False
         if authored_work_opener is not None:
             is_major = False
+        elif (
+            is_source_top_level
+            and current_work
+            and text_key == normalized_title_key(current_work)
+            and not is_division
+        ):
+            # Delphi reprints the dialogue title before the body text. Keep only
+            # the first major-work opener; drop later duplicates from TOC/layout.
+            strip_tag(h)
+            continue
         elif is_source_top_level and not is_chapterish and not is_frontmatter and not is_backmatter:
             is_major = True
         elif level == 1 and not is_chapterish and not is_chapter_section_heading and not is_frontmatter and not in_embedded_subwork:
@@ -1129,9 +1268,14 @@ def normalize_headings(
         elif is_backmatter:
             current_work = text
             h["class"] = add_classes(h, ["backmatter-opener", "formal-opener"])
-        elif is_frontmatter:
-            current_work = text
-            h["class"] = add_classes(h, ["frontmatter-opener", "formal-opener"])
+        elif is_frontmatter and not is_chapter_section_heading:
+            # Jowett-style per-dialogue "INTRODUCTION" is in-work apparatus, not book frontmatter.
+            if current_work and not C.FRONTMATTER_PATTERNS.match(str(current_work).rstrip(" .")):
+                h["class"] = add_classes(h, ["chapter-section-heading"])
+                is_chapter_section_heading = True
+            else:
+                current_work = text
+                h["class"] = add_classes(h, ["frontmatter-opener", "formal-opener"])
         elif authored_work_opener is not None:
             title, author = authored_work_opener
             current_work = title
@@ -1174,7 +1318,7 @@ def normalize_headings(
             toc.append(
                 TocEntry(toc_level, toc_title, str(ident), "backmatter" if is_backmatter else "work", source_level)
             )
-        elif is_frontmatter:
+        elif is_frontmatter and not is_chapter_section_heading:
             toc.append(TocEntry(1 if not current_division else 2, toc_title, str(ident), "frontmatter", source_level))
         elif is_chapterish and level == 2:
             toc.append(TocEntry(2 if not current_division else 3, toc_title, str(ident), "chapter", source_level))
@@ -1294,13 +1438,15 @@ def _looks_like_work_description(text: str, heading_text: str) -> bool:
     )
     strong_editorial_vocab = re.search(
         r"\b(published|appeared|written|wrote|composed|completed|novel|novella|story|"
-        r"tale|poem|play|drama|work|collection|translated|first|last|inspired|"
+        r"tale|poem|play|drama|dialogue|dialogues|work|collection|translated|first|last|inspired|"
         r"based|deals with|concerns|tells|features|regarded|acclaimed)\b",
         s,
         re.I,
     )
     bibliographic_marker = re.search(
-        r"\b(1[5-9]\d{2}|20\d{2}|Dostoevsky|Dostoyevsky|Tolstoy|Dickens|Balzac|Poe|Gogol|Turgenev)\b", s
+        r"\b(1[5-9]\d{2}|20\d{2}|Dostoevsky|Dostoyevsky|Tolstoy|Dickens|Balzac|Poe|Gogol|Turgenev|"
+        r"Plato|Socrates|Aristotle|Jowett)\b",
+        s,
     )
     return bool((title_mentioned and strong_editorial_vocab) or (editorial_vocab and bibliographic_marker))
 
@@ -1962,7 +2108,8 @@ def clean_document(
     normalize_poetry(soup, doc, log)
     remove_compact_local_contents_blocks(soup, log)
     normalize_cast_and_drama(soup, log)
-    promote_paragraph_headings(soup, log)
+    _seed_doc_from_source_top_level(soup, doc, source_top_level_keys, current_work=current_work)
+    promote_paragraph_headings(soup, log, source_top_level_keys=source_top_level_keys)
     current_work = add_synthetic_opener_if_needed(soup, doc, toc, used_ids, current_work)
     current_work, current_division = normalize_headings(
         soup,

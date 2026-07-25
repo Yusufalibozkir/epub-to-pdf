@@ -71,7 +71,7 @@ LOCAL_TOC_HEADINGS: re.Pattern = _register("LOCAL_TOC_HEADINGS",
 COLLECTION_DIVISIONS: re.Pattern = _register("COLLECTION_DIVISIONS",
     r"^(the )?(novels|short stories|stories|plays|poetry|poems|memoirs|letters|notebooks|"
     r"essays|biograph(y|ies)|appendices|tales|sketches|dramas|translations|miscellanies|"
-    r"non[- ]fiction|verse|narrative poems|lyric poems)$",
+    r"non[- ]fiction|verse|narrative poems|lyric poems|spurious works|epistles|greek texts)$",
 )
 
 MAJOR_WORK_HINTS: re.Pattern = _register("MAJOR_WORK_HINTS",

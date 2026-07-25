@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Deluxe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="side">
+      <div class="side-brand">
+        <div class="logo">Deluxe</div>
+        <p>EPUB to print PDF</p>
+      </div>
+
+      <nav class="side-nav">
+        <a href="#compose" class="active">New build</a>
+        <a href="#jobs">Jobs</a>
+        <a href="#proof">Proof</a>
+        <a href="/settings">Settings</a>
+      </nav>
+
+      <div class="side-jobs" id="job-list"></div>
+
+      <div class="side-foot">
+        <button type="button" id="btn-refresh-jobs">Refresh</button>
+        <span>localhost:8765</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="main-head">
+        <div>
+          <h1>New build</h1>
+          <p>Configure the press, run a sample, then inspect the proof.</p>
+        </div>
+        <div class="head-status">
+          <span id="job-status">idle</span>
+          <strong id="job-stage">Ready</strong>
+        </div>
+      </header>
+
+      <section class="block" id="compose">
+        <form id="job-form">
+          <div class="row upload-row">
+            <label class="file" id="dropzone">
+              <input type="file" id="epub" accept=".epub,application/epub+zip" required />
+              <em>EPUB</em>
+              <span id="epub-label">Choose a file or drop it here</span>
+            </label>
+          </div>
+
+          <div class="grid">
+            <label>
+              Title
+              <input id="title" name="title" placeholder="Complete Works of Plato" />
+            </label>
+            <label>
+              Author
+              <input id="author" name="author" placeholder="Optional" />
+            </label>
+            <label>
+              Output name
+              <input id="out_name" name="out_name" placeholder="plato_sample" />
+            </label>
+            <label>
+              Config
+              <select id="config" name="config"></select>
+            </label>
+            <label>
+              Volume mode
+              <select id="volume_mode" name="volume_mode">
+                <option value="auto">auto</option>
+                <option value="collection" selected>collection</option>
+                <option value="single">single</option>
+              </select>
+            </label>
+            <label>
+              TOC mode
+              <select id="toc_mode" name="toc_mode">
+                <option value="simple" selected>simple</option>
+                <option value="hierarchical">hierarchical</option>
+                <option value="auto">auto</option>
+              </select>
+            </label>
+            <label>
+              Sample pages
+              <input id="sample_pages" name="sample_pages" type="number" min="0" value="50" />
+            </label>
+            <label>
+              Section preview
+              <input id="section" name="section" placeholder="APOLOGY" />
+            </label>
+            <label>
+              AI provider
+              <select id="ai_provider" name="ai_provider">
+                <option value="openai">openai</option>
+                <option value="deepseek">deepseek</option>
+                <option value="none">none</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="options">
+            <label><input type="checkbox" id="use_openai" /> AI structure planning</label>
+            <label><input type="checkbox" id="openai_qa" /> AI visual QA</label>
+            <label><input type="checkbox" id="keep_all_images" /> Keep all images</label>
+            <label><input type="checkbox" id="remove_all_images" /> Remove all images</label>
+            <label><input type="checkbox" id="strict" /> Strict mode</label>
+            <label><input type="checkbox" id="debug_html" checked /> Debug HTML</label>
+          </div>
+          <p class="fineprint options-note">
+            Debug HTML writes intermediate markup under <code>artifacts/…/build/</code>.
+            Full setting list: <a href="/settings">Settings</a>.
+          </p>
+
+          <div class="actions">
+            <button type="submit" id="btn-run">Run pipeline</button>
+            <p id="form-hint">Output goes to <code>output/</code> and <code>artifacts/</code>.</p>
+          </div>
+        </form>
+      </section>
+
+      <section class="block" id="jobs">
+        <div class="block-head">
+          <h2>Run log</h2>
+          <p id="job-meta"></p>
+        </div>
+        <div class="progress"><i id="progress-bar"></i></div>
+        <pre id="job-log"></pre>
+      </section>
+
+      <section class="block" id="proof">
+        <div class="block-head">
+          <h2>Proof</h2>
+          <div class="review-actions" id="review-actions">
+            <p>No proof yet.</p>
+          </div>
+        </div>
+        <div class="proofs" id="qa-grid"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
